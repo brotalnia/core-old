@@ -2738,6 +2738,11 @@ void Aura::HandleChannelDeathItem(bool apply, bool Real)
 
         Item* newitem = ((Player*)caster)->StoreNewItem(dest, spellInfo->EffectItemType[m_effIndex], true);
         ((Player*)caster)->SendNewItem(newitem, count, true, true);
+
+        if (caster->HasSpell(18372) && !caster->HasAura(18371))
+        {
+            caster->CastSpell(caster, 18371, true);
+        }
     }
 }
 
