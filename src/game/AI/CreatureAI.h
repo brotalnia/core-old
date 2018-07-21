@@ -194,6 +194,9 @@ class MANGOS_DLL_SPEC CreatureAI
         // Does creature chase its target ?
         bool IsCombatMovement() const { return m_CombatMovementEnabled; }
 
+        // Does creature attack its target ?
+        bool IsMeleeAttackEnabled() const { return m_MeleeEnabled; }
+
         /**
         * Check if unit is visible for MoveInLineOfSight
         * Note: This check is by default only the state-depending (visibility, range), NOT LineOfSight
