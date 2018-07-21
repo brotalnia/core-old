@@ -75,7 +75,12 @@ bool GossipHello_npc_lothos_riftwaker(Player* pPlayer, Creature* pCreature)
     if (pCreature->isQuestGiver())
         pPlayer->PrepareQuestMenu(pCreature->GetGUID());
 
-    if ((sWorld.GetWowPatch() > WOW_PATCH_102) && (pPlayer->GetQuestRewardStatus(7487) || pPlayer->GetQuestRewardStatus(7848)))
+    // Note that the attunement quests were not actually added to the game until 1.3
+    // Prior to this, there was simply a 'discovery quest', and you must run through
+    // BRD to get into MC.
+    // Furthermore, such a system is not currently supported in our core, since if you
+    // were to die in MC there is no way to recover your corpse!
+    if (pPlayer->GetQuestRewardStatus(7487) || pPlayer->GetQuestRewardStatus(7848))
         pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Teleport me to the Molten Core", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 1);
 
     pPlayer->SEND_GOSSIP_MENU(pPlayer->GetGossipTextId(pCreature), pCreature->GetGUID());
@@ -157,7 +162,21 @@ struct npc_dorius_stonetenderAI : public npc_escortAI
         Reset();
     }
 
-    void Reset() override { }
+    void Reset() override {}
+
+    void ResetCreature() override
+    {
+        m_creature->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE);
+        m_creature->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER);
+        m_creature->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PASSIVE);
+    }
+
+    void JustStartedEscort() override
+    {
+        m_creature->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE);
+        m_creature->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER);
+        m_creature->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PASSIVE);
+    }
 
     void Aggro(Unit* pWho) override
     {
@@ -271,12 +290,19 @@ struct npc_obsidionAI : public ScriptedAI
         m_playerList.clear();
         m_IsEventRunning = false;
         m_creature->SetStandState(UNIT_STAND_STATE_DEAD);
-        m_creature->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_OOC_NOT_ATTACKABLE | UNIT_FLAG_PASSIVE);
+        m_creature->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER | UNIT_FLAG_PASSIVE);
 
         if (Creature* cr = m_creature->GetMap()->GetCreature(m_Dorius))
             cr->DeleteLater();
         m_Dorius.Clear();
 
+    }
+
+    void Aggro(Unit* pWho) override
+    {
+        m_creature->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER);
+        m_creature->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PASSIVE);
+        ScriptedAI::Aggro(pWho);
     }
 
     void StartEvent()
@@ -340,7 +366,11 @@ struct npc_obsidionAI : public ScriptedAI
 
                         AttackStart(player);
                         if (Creature* lathoric = m_creature->GetMap()->GetCreature(m_Dorius))
+                        {
+                            lathoric->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER);
                             lathoric->AI()->AttackStart(player);
+                        }
+                            
                         break;
                     }
                 }

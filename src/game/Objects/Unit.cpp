@@ -322,7 +322,7 @@ void Unit::Update(uint32 update_diff, uint32 p_time)
 
     // extra attack
     Unit* victim = getVictim();
-    if (isInCombat() && m_doExtraAttacks && GetExtraAttacks() && victim && CanReachWithMeleeAttack(victim))
+    if (isInCombat() && m_doExtraAttacks && GetExtraAttacks() && victim && (CanAutoAttackTarget(victim) == ATTACK_RESULT_OK))
     {
         m_doExtraAttacks = false;
 
@@ -376,69 +376,110 @@ void Unit::Update(uint32 update_diff, uint32 p_time)
         _damageTakenHistory.clear();
 }
 
+AutoAttackCheckResult Unit::CanAutoAttackTarget(Unit const* pVictim) const
+{
+    if (hasUnitState(UNIT_STAT_CAN_NOT_REACT) || HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PACIFIED))
+        return ATTACK_RESULT_CANT_ATTACK;
+
+    if (!pVictim->isAlive() || !isAlive())
+        return ATTACK_RESULT_DEAD;
+
+    if (!CanReachWithMeleeAttack(pVictim) || (!IsWithinLOSInMap(pVictim) && !hasUnitState(UNIT_STAT_ALLOW_LOS_ATTACK)))
+        return  ATTACK_RESULT_NOT_IN_RANGE;
+
+    if (!HasInArc(2 * M_PI_F / 3, pVictim))
+        return ATTACK_RESULT_BAD_FACING;
+
+    return ATTACK_RESULT_OK;
+}
+
+void Unit::DelayAutoAttacks()
+{
+    if (isAttackReady(BASE_ATTACK))
+        setAttackTimer(BASE_ATTACK, 100);
+    if (haveOffhandWeapon() && isAttackReady(OFF_ATTACK))
+        setAttackTimer(OFF_ATTACK, 100);
+}
+
 bool Unit::UpdateMeleeAttackingState()
 {
-    Unit* victim = getVictim();
-    if (!victim || IsNonMeleeSpellCasted(false))
+    Unit* pVictim = getVictim();
+
+    if (!pVictim || IsNonMeleeSpellCasted(false))
         return false;
 
     if (!isAttackReady(BASE_ATTACK) && !(isAttackReady(OFF_ATTACK) && haveOffhandWeapon()))
         return false;
 
-    uint8 swingError = 0;
-    if (!CanReachWithMeleeAttack(victim) || (!IsWithinLOSInMap(victim) && !hasUnitState(UNIT_STAT_ALLOW_LOS_ATTACK)))
+    AutoAttackCheckResult swingError = CanAutoAttackTarget(pVictim);
+
+    Player* pPlayer = ToPlayer();
+    switch (swingError)
     {
-        if (isAttackReady(BASE_ATTACK))
-            setAttackTimer(BASE_ATTACK, 100);
-        if (haveOffhandWeapon() && isAttackReady(OFF_ATTACK))
-            setAttackTimer(OFF_ATTACK, 100);
-        swingError = 1;
-    }
-    // 120 degrees of radiant range
-    else if (!HasInArc(2 * M_PI_F / 3, victim))
-    {
-        if (isAttackReady(BASE_ATTACK))
-            setAttackTimer(BASE_ATTACK, 100);
-        if (haveOffhandWeapon() && isAttackReady(OFF_ATTACK))
-            setAttackTimer(OFF_ATTACK, 100);
-        swingError = 2;
-    }
-    else
-    {
-        if (isAttackReady(BASE_ATTACK))
+        case ATTACK_RESULT_OK:
         {
-            // prevent base and off attack in same time, delay attack at 0.2 sec
-            if (haveOffhandWeapon())
+            if (isAttackReady(BASE_ATTACK))
             {
-                if (getAttackTimer(OFF_ATTACK) < ATTACK_DISPLAY_DELAY)
-                    setAttackTimer(OFF_ATTACK, ATTACK_DISPLAY_DELAY);
+                // prevent base and off attack in same time, delay attack at 0.2 sec
+                if (haveOffhandWeapon())
+                {
+                    if (getAttackTimer(OFF_ATTACK) < ATTACK_DISPLAY_DELAY)
+                        setAttackTimer(OFF_ATTACK, ATTACK_DISPLAY_DELAY);
+                }
+                AttackerStateUpdate(pVictim, BASE_ATTACK, false);
+                resetAttackTimer(BASE_ATTACK);
             }
-            AttackerStateUpdate(victim, BASE_ATTACK, false);
-            resetAttackTimer(BASE_ATTACK);
+            if (haveOffhandWeapon() && isAttackReady(OFF_ATTACK))
+            {
+                // prevent base and off attack in same time, delay attack at 0.2 sec
+                uint32 base_att = getAttackTimer(BASE_ATTACK);
+                if (base_att < ATTACK_DISPLAY_DELAY)
+                    setAttackTimer(BASE_ATTACK, ATTACK_DISPLAY_DELAY);
+                // do attack
+                AttackerStateUpdate(pVictim, OFF_ATTACK, false);
+                resetAttackTimer(OFF_ATTACK);
+            }
+            break;
         }
-        if (haveOffhandWeapon() && isAttackReady(OFF_ATTACK))
+        case ATTACK_RESULT_NOT_IN_RANGE:
         {
-            // prevent base and off attack in same time, delay attack at 0.2 sec
-            uint32 base_att = getAttackTimer(BASE_ATTACK);
-            if (base_att < ATTACK_DISPLAY_DELAY)
-                setAttackTimer(BASE_ATTACK, ATTACK_DISPLAY_DELAY);
-            // do attack
-            AttackerStateUpdate(victim, OFF_ATTACK, false);
-            resetAttackTimer(OFF_ATTACK);
+            DelayAutoAttacks();
+            if (pPlayer && pPlayer->GetLastSwingErrorMsg() != ATTACK_RESULT_NOT_IN_RANGE)
+                pPlayer->SendAttackSwingNotInRange();
+            break;
+        }
+        case ATTACK_RESULT_BAD_FACING:
+        {
+            DelayAutoAttacks();
+            if (pPlayer && pPlayer->GetLastSwingErrorMsg() != ATTACK_RESULT_BAD_FACING)
+                pPlayer->SendAttackSwingBadFacingAttack();
+            break;
+        }
+        case ATTACK_RESULT_CANT_ATTACK:
+        {
+            DelayAutoAttacks();
+            break;
+        }
+        case ATTACK_RESULT_DEAD:
+        {
+            AttackStop(true);
+            if (pPlayer && pPlayer->GetLastSwingErrorMsg() != ATTACK_RESULT_DEAD)
+                pPlayer->SendAttackSwingDeadTarget();
+            break;
+        }
+        case ATTACK_RESULT_FRIENDLY_TARGET:
+        {
+            AttackStop(true);
+            if (pPlayer && pPlayer->GetLastSwingErrorMsg() != ATTACK_RESULT_FRIENDLY_TARGET)
+                pPlayer->SendAttackSwingCantAttack();
+            break;
         }
     }
+        
+    if (pPlayer)
+        pPlayer->SetSwingErrorMsg(swingError); 
 
-    Player* player = (GetTypeId() == TYPEID_PLAYER ? (Player*)this : NULL);
-    if (player && swingError != player->LastSwingErrorMsg())
-    {
-        if (swingError == 1)
-            player->SendAttackSwingNotInRange();
-        else if (swingError == 2)
-            player->SendAttackSwingBadFacingAttack();
-        player->SwingErrorMsg(swingError);
-    }
-
-    return swingError == 0;
+    return swingError == ATTACK_RESULT_OK;
 }
 
 bool Unit::haveOffhandWeapon() const
@@ -1251,9 +1292,11 @@ void Unit::Kill(Unit* pVictim, SpellEntry const *spellProto, bool durabilityLoss
                     creature->SetFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE);
         }
 
-        // Call creature just died function
         if (creature->AI())
             creature->AI()->JustDied(this);
+
+        if (CreatureGroup* group = creature->GetCreatureGroup())
+            group->OnMemberDied(creature);
 
         if (creature->IsTemporarySummon())
         {
@@ -2214,7 +2257,7 @@ void Unit::CalculateDamageAbsorbAndResist(Unit *pCaster, SpellSchoolMask schoolM
     else if (spellProto && spellProto->AttributesEx4 & SPELL_ATTR_EX4_IGNORE_RESISTANCES)
         canResist = false;
 
-    DEBUG_UNIT_IF(spellProto, this, DEBUG_SPELL_COMPUTE_RESISTS, "%s : Binary [%s]. Partial resists %s", spellProto->SpellName[2], spellProto->IsBinary() ? "YES" : "NO", canResist ? "possible" : "impossible");
+    DEBUG_UNIT_IF(spellProto, this, DEBUG_SPELL_COMPUTE_RESISTS, "%s : Binary [%s]. Partial resists %s", spellProto->SpellName[2].c_str(), spellProto->IsBinary() ? "YES" : "NO", canResist ? "possible" : "impossible");
 
     if (canResist)
     {
@@ -2473,12 +2516,6 @@ void Unit::CalculateAbsorbResistBlock(Unit *pCaster, SpellNonMeleeDamage *damage
 
 void Unit::AttackerStateUpdate(Unit *pVictim, WeaponAttackType attType, bool checkLoS, bool extra)
 {
-    if (hasUnitState(UNIT_STAT_CAN_NOT_REACT) || HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PACIFIED))
-        return;
-
-    if (!pVictim->isAlive() || !isAlive())
-        return;
-
     if (!extra && IsNonMeleeSpellCasted(false))
         return;
 
@@ -2765,6 +2802,9 @@ uint32 Unit::CalculateDamage(WeaponAttackType attType, bool normalized, uint8 in
                 break;
         }
     }
+
+    if (min_damage < 0) min_damage = 0.0f;
+    if (max_damage < 0) max_damage = 0.0f;
 
     if (min_damage > max_damage)
         std::swap(min_damage, max_damage);
@@ -3063,7 +3103,7 @@ int32 Unit::MagicSpellHitChance(Unit *pVictim, SpellEntry const *spell, Spell* s
     else
         modHitChance = 94 - (leveldif - 2) * lchance;
 
-    DEBUG_UNIT(this, DEBUG_SPELL_COMPUTE_RESISTS, "%s [%u] : Binary [%s]. Base hit chance %f, level diff: %d", spell->SpellName[2], spell->Id, spell->IsBinary() ? "YES" : "NO", modHitChance, leveldif);
+    DEBUG_UNIT(this, DEBUG_SPELL_COMPUTE_RESISTS, "%s [%u] : Binary [%s]. Base hit chance %f, level diff: %d", spell->SpellName[2].c_str(), spell->Id, spell->IsBinary() ? "YES" : "NO", modHitChance, leveldif);
 
     // Spellmod from SPELLMOD_RESIST_MISS_CHANCE
     if (Player *modOwner = GetSpellModOwner())
@@ -6162,7 +6202,7 @@ bool Unit::canAttack(Unit const* target, bool force) const
     else if (!IsHostileTo(target))
         return false;
 
-    if (!target->isAttackableByAOE() || target->hasUnitState(UNIT_STAT_DIED))
+    if (!target->isAttackableByAOE(false, IsPlayer()) || target->hasUnitState(UNIT_STAT_DIED))
         return false;
 
     // shaman totem quests: spell 8898, shaman can detect elementals but elementals cannot see shaman
@@ -6715,7 +6755,7 @@ bool Unit::IsSpellCrit(Unit *pVictim, SpellEntry const *spellProto, SpellSchoolM
 
     crit_chance = crit_chance > 0.0f ? crit_chance : 0.0f;
 
-    DEBUG_UNIT(this, DEBUG_SPELL_COMPUTE_RESISTS, "%s [ID:%u] Crit chance %f.", spellProto->SpellName[2], spellProto->Id, crit_chance);
+    DEBUG_UNIT(this, DEBUG_SPELL_COMPUTE_RESISTS, "%s [ID:%u] Crit chance %f.", spellProto->SpellName[2].c_str(), spellProto->Id, crit_chance);
 
     if ((IsPlayer() && ToPlayer()->HasOption(PLAYER_CHEAT_UNRANDOMIZE)) ||
         (pVictim->IsPlayer() && pVictim->ToPlayer()->HasOption(PLAYER_CHEAT_UNRANDOMIZE)))
@@ -7445,11 +7485,7 @@ void Unit::SetInCombatState(bool PvP, Unit* enemy)
     if (creatureNotInCombat)
     {
         auto pCreature = ToCreature();
-
         pCreature->SetCombatStartPosition(GetPositionX(), GetPositionY(), GetPositionZ());
-        // should probably be removed for the attacked (+ it's party/group) only, not global
-        RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_OOC_NOT_ATTACKABLE);
-
         OnEnterCombat(enemy, true);
 
         // Some bosses are set into combat with zone
@@ -7472,17 +7508,12 @@ void Unit::ClearInCombat()
 
     // Player's state will be cleared in Player::UpdateContestedPvP
     if (GetTypeId() != TYPEID_PLAYER)
-    {
-        if (((Creature*)this)->GetCreatureInfo()->unit_flags & UNIT_FLAG_OOC_NOT_ATTACKABLE)
-            SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_OOC_NOT_ATTACKABLE);
-
         clearUnitState(UNIT_STAT_ATTACK_PLAYER);
-    }
 
     RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PET_IN_COMBAT);
 }
 
-bool Unit::isTargetableForAttack(bool inverseAlive /*=false*/) const
+bool Unit::isTargetableForAttack(bool inverseAlive /*=false*/, bool isAttackerPlayer /*=false*/) const
 {
     if (!CanBeDetected())
         return false;
@@ -7505,8 +7536,7 @@ bool Unit::isTargetableForAttack(bool inverseAlive /*=false*/) const
     if (HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE))
         return false;
 
-    // to be removed if unit by any reason enter combat
-    if (HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_OOC_NOT_ATTACKABLE))
+    if (isAttackerPlayer && HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER))
         return false;
 
     // inversealive is needed for some spells which need to be casted at dead targets (aoe)
@@ -7516,13 +7546,8 @@ bool Unit::isTargetableForAttack(bool inverseAlive /*=false*/) const
     return IsInWorld() && !hasUnitState(UNIT_STAT_DIED) && !IsTaxiFlying();
 }
 
-bool Unit::IsValidAttackTarget(Unit const* target) const
-{
-    return _IsValidAttackTarget(target, nullptr);
-}
-
 // function based on function Unit::CanAttack from 13850 client
-bool Unit::_IsValidAttackTarget(Unit const* target, SpellEntry const* bySpell, WorldObject const* obj) const
+bool Unit::IsValidAttackTarget(Unit const* target) const
 {
     ASSERT(target);
     // can't attack self
@@ -7540,6 +7565,9 @@ bool Unit::_IsValidAttackTarget(Unit const* target, SpellEntry const* bySpell, W
     if (target->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_TAXI_FLIGHT | UNIT_FLAG_NOT_ATTACKABLE_1 | UNIT_FLAG_UNK_16))
         return false;
 
+    if (IsPlayer() && target->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER))
+        return false;
+
     // CvC case - can attack each other only when one of them is hostile
     if (!HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE) && !target->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE))
         return GetReactionTo(target) <= REP_HOSTILE || target->GetReactionTo(this) <= REP_HOSTILE;
@@ -7550,8 +7578,8 @@ bool Unit::_IsValidAttackTarget(Unit const* target, SpellEntry const* bySpell, W
             || target->GetReactionTo(this) > REP_NEUTRAL)
         return false;
 
-    Player const* playerAffectingAttacker = HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE) ? GetAffectingPlayer() : NULL;
-    Player const* playerAffectingTarget = target->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE) ? target->GetAffectingPlayer() : NULL;
+    Player const* playerAffectingAttacker = HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE) ? GetAffectingPlayer() : nullptr;
+    Player const* playerAffectingTarget = target->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE) ? target->GetAffectingPlayer() : nullptr;
 
     // Not all neutral creatures can be attacked
     if (GetReactionTo(target) == REP_NEUTRAL &&
@@ -8031,7 +8059,8 @@ void Unit::UpdateSpeed(UnitMoveType mtype, bool forced, float ratio)
     {
         // Before patch 1.9 pets should retain their wild speed, after that they are normalised
         Creature* pCreature = (Creature*)this;
-        if (!(pCreature->IsPet() && pCreature->GetOwnerGuid().IsPlayer()) || (sWorld.GetWowPatch() < WOW_PATCH_109))
+        if (!(pCreature->IsPet() && pCreature->GetOwnerGuid().IsPlayer()) || 
+            (sWorld.GetWowPatch() < WOW_PATCH_109 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PETS)))
         {
             switch (mtype)
             {
@@ -10140,6 +10169,10 @@ void Unit::ApplyAttackTimePercentMod(WeaponAttackType att, float val, bool apply
     }
     else
     {
+#if SUPPORTED_CLIENT_BUILD < CLIENT_BUILD_1_12_1
+        val = -val;
+        apply = !apply;
+#endif
         ApplyPercentModFloatVar(m_modAttackSpeedPct[att], -val, apply);
         ApplyPercentModFloatValue(UNIT_FIELD_BASEATTACKTIME + att, -val, apply);
 
@@ -10150,7 +10183,17 @@ void Unit::ApplyAttackTimePercentMod(WeaponAttackType att, float val, bool apply
 
 void Unit::ApplyCastTimePercentMod(float val, bool apply)
 {
-    ApplyPercentModFloatValue(UNIT_MOD_CAST_SPEED, -val, apply);
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
+    SetFloatValue(UNIT_MOD_CAST_SPEED, GetFloatValue(UNIT_MOD_CAST_SPEED) * (apply ? 100.0f / (100.0f + val) : (100.0f + val) / 100.0f));
+#else
+    val = -val;
+    SetInt32Value(UNIT_MOD_CAST_SPEED, (int32)round((((1.0f + GetInt32Value(UNIT_MOD_CAST_SPEED) / 100.0f) * (apply ? (100.0f + val) / 100.0f : 100.0f / (100.0f + val))) - 1.0f)*100.0f));
+    /*
+    Code below will make a 50% positive effect cancel out a 50% negative one exactly. But it shouldn't before 1.12!
+    int32 intval = round(val);
+    SetInt32Value(UNIT_MOD_CAST_SPEED, (GetInt32Value(UNIT_MOD_CAST_SPEED) + (apply ? -intval : intval)));
+    */
+#endif
 }
 
 void Unit::UpdateAuraForGroup(uint8 slot)
@@ -11003,13 +11046,15 @@ void Unit::Ambush(Unit* pNewVictim, uint32 embushSpellId)
     }
 }
 
-bool Unit::isAttackableByAOE(bool requireDeadTarget) const
+bool Unit::isAttackableByAOE(bool requireDeadTarget, bool isCasterPlayer) const
 {
     if (isAlive() == requireDeadTarget)
         return false;
 
-    if (HasFlag(UNIT_FIELD_FLAGS,
-                UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_OOC_NOT_ATTACKABLE))
+    if (HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE))
+        return false;
+
+    if (isCasterPlayer && HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER))
         return false;
 
     if (GetTypeId() == TYPEID_PLAYER && ToPlayer()->isGameMaster())

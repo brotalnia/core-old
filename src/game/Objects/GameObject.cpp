@@ -167,6 +167,10 @@ bool GameObject::Create(uint32 guidlow, uint32 name_id, Map *map, float x, float
 
     SetObjectScale(goinfo->size);
 
+#if SUPPORTED_CLIENT_BUILD < CLIENT_BUILD_1_12_1
+    SetUInt32Value(GAMEOBJECT_TIMESTAMP, (uint32)time(nullptr));
+#endif
+
     SetFloatValue(GAMEOBJECT_POS_X, x);
     SetFloatValue(GAMEOBJECT_POS_Y, y);
     SetFloatValue(GAMEOBJECT_POS_Z, z);
@@ -214,7 +218,7 @@ public:
         if (!i_trap->CanSeeInWorld(u))
             return false;
         bool _isTotem = u->GetTypeId() == TYPEID_UNIT && ((Creature*)u)->IsTotem();
-        if (u->isAlive() && i_trap->IsWithinDistInMap(u, _isTotem ? i_range / 3.0f : i_range) && i_trapOwner->_IsValidAttackTarget(u))
+        if (u->isAlive() && i_trap->IsWithinDistInMap(u, _isTotem ? i_range / 3.0f : i_range) && i_trapOwner->IsValidAttackTarget(u))
         {
             i_range = i_trap->GetDistance(u);
             return true;

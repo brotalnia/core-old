@@ -476,6 +476,7 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleGuildUninviteCommand(char* args);
         bool HandleGuildRankCommand(char* args);
         bool HandleGuildDeleteCommand(char* args);
+        bool HandleGuildRenameCommand(char* args);
 
         bool HandleHonorShow(char* args);
         bool HandleHonorAddCommand(char* args);
@@ -505,6 +506,7 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleLearnAllMyClassCommand(char* args);
         bool HandleLearnAllMySpellsCommand(char* args);
         bool HandleLearnAllMyTalentsCommand(char* args);
+        bool HandleLearnAllMyTaxisCommand(char* args);
 
         bool HandleListAurasCommand(char* args);
         bool HandleListCreatureCommand(char* args);
@@ -536,6 +538,7 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleLookupSoundCommand(char* args);
         bool HandleLookupTaxiNodeCommand(char* args);
         bool HandleLookupTeleCommand(char* args);
+        bool HandleLookupGuildCommand(char* args);
 
         bool HandleModifyHPCommand(char* args);
         bool HandleModifyManaCommand(char* args);
@@ -545,6 +548,7 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleModifyASpeedCommand(char* args);
         bool HandleModifySpeedCommand(char* args);
         bool HandleModifyBWalkCommand(char* args);
+        bool HandleModifyFlyCommand(char* args);
         bool HandleModifySwimCommand(char* args);
         bool HandleModifyScaleCommand(char* args);
         bool HandleModifyMountCommand(char* args);
@@ -586,7 +590,6 @@ class MANGOS_DLL_SPEC ChatHandler
         //-----------------------Npc Commands-----------------------
         bool HandleNpcAddCommand(char* args);
         bool HandleNpcSummonCommand(char* args);
-        bool HandleNpcAddMoveCommand(char* args);
         bool HandleNpcAddVendorItemCommand(char* args);
         bool HandleNpcAIInfoCommand(char* args);
         bool HandleNpcAllowMovementCommand(char* args);
@@ -662,6 +665,7 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleReloadGameGraveyardZoneCommand(char* args);
         bool HandleReloadGameObjectScriptsCommand(char* args);
         bool HandleReloadGameTeleCommand(char* args);
+        bool HandleReloadTaxiPathTransitionsCommand(char* args);
         bool HandleReloadGossipMenuCommand(char* args);
         bool HandleReloadGossipMenuOptionCommand(char* args);
         bool HandleReloadGossipScriptsCommand(char* args);
@@ -767,7 +771,6 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleWpModifyCommand(char* args);
         bool HandleWpShowCommand(char* args);
         bool HandleWpExportCommand(char* args);
-        bool HandleWpImportCommand(char* args);
 
         bool HandleHelpCommand(char* args);
         bool HandleCommandsCommand(char* args);
@@ -801,6 +804,7 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleUnLearnCommand(char* args);
         bool HandleRemoveRidingCommand(char* args);
         bool HandleGetDistanceCommand(char* args);
+        bool HandleGetAngleCommand(char* args);
         bool HandleModifyStandStateCommand(char* args);
         bool HandleDieCommand(char* args);
         bool HandleFearCommand(char* args);

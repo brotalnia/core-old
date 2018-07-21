@@ -578,7 +578,7 @@ void ScriptMgr::LoadScripts(ScriptMapMap& scripts, const char* tablename)
             }
             case SCRIPT_COMMAND_SET_FACTION:
             {
-                if (tmp.faction.factionId && !sObjectMgr.GetFactionEntry(tmp.faction.factionId))
+                if (tmp.faction.factionId && !sObjectMgr.GetFactionTemplateEntry(tmp.faction.factionId))
                 {
                     sLog.outErrorDb("Table `%s` has datalong2 = %u in SCRIPT_COMMAND_SET_FACTION for script id %u, but this faction does not exist.", tablename, tmp.faction.factionId, tmp.id);
                     continue;
@@ -663,9 +663,9 @@ void ScriptMgr::LoadScripts(ScriptMapMap& scripts, const char* tablename)
             }
             case SCRIPT_COMMAND_STAND_STATE:
             {
-                if (tmp.standState.stand_state >= MAX_UNIT_STAND_STATE)
+                if (tmp.standState.standState >= MAX_UNIT_STAND_STATE)
                 {
-                    sLog.outErrorDb("Table `%s` has invalid stand state (datalong = %u) in SCRIPT_COMMAND_STAND_STATE for script id %u", tablename, tmp.standState.stand_state, tmp.id);
+                    sLog.outErrorDb("Table `%s` has invalid stand state (datalong = %u) in SCRIPT_COMMAND_STAND_STATE for script id %u", tablename, tmp.standState.standState, tmp.id);
                     continue;
                 }
                 break;
@@ -909,18 +909,18 @@ void ScriptMgr::LoadScripts(ScriptMapMap& scripts, const char* tablename)
                         sLog.outErrorDb("Table `%s` has dataint%u with negative chance in SCRIPT_COMMAND_CREATURE_SPELLS for script id %u.", tablename, i, tmp.id);
                         break;
                     }
-                    else if (tmp.creatureSpells.spells_template[i])
+                    else if (tmp.creatureSpells.spellTemplate[i])
                     {
-                        if (!sObjectMgr.GetCreatureSpellsTemplate(tmp.creatureSpells.spells_template[i]))
+                        if (!sObjectMgr.GetCreatureSpellsTemplate(tmp.creatureSpells.spellTemplate[i]))
                         {
                             abort = true;
-                            sLog.outErrorDb("Table `%s` has datalong%u=%u for a non-existent creature spells template in SCRIPT_COMMAND_CREATURE_SPELLS for script id %u.", tablename, i, tmp.creatureSpells.spells_template[i], tmp.id);
+                            sLog.outErrorDb("Table `%s` has datalong%u=%u for a non-existent creature spells template in SCRIPT_COMMAND_CREATURE_SPELLS for script id %u.", tablename, i, tmp.creatureSpells.spellTemplate[i], tmp.id);
                             break;
                         }
                         if (!tmp.creatureSpells.chance[i])
                         {
                             abort = true;
-                            sLog.outErrorDb("Table `%s` has datalong%u=%u with 0%% chance in SCRIPT_COMMAND_CREATURE_SPELLS for script id %u.", tablename, i, tmp.creatureSpells.spells_template[i], tmp.id);
+                            sLog.outErrorDb("Table `%s` has datalong%u=%u with 0%% chance in SCRIPT_COMMAND_CREATURE_SPELLS for script id %u.", tablename, i, tmp.creatureSpells.spellTemplate[i], tmp.id);
                             break;
                         }
                     }
@@ -970,6 +970,106 @@ void ScriptMgr::LoadScripts(ScriptMapMap& scripts, const char* tablename)
                     {
                         sLog.outErrorDb("Table `%s` using nonexistent spell (id: %u) in SCRIPT_COMMAND_REMOVE_SPELL_COOLDOWN for script id %u", tablename, tmp.removeCooldown.spellId, tmp.id);
                         continue;
+                    }
+                }
+                break;
+            }
+            case SCRIPT_COMMAND_SET_REACT_STATE:
+            {
+                if (tmp.setReactState.state > REACT_AGGRESSIVE)
+                {
+                    sLog.outErrorDb("Table `%s` has datalong = %u in SCRIPT_COMMAND_SET_REACT_STATE for script id %u.", tablename, tmp.setReactState.state, tmp.id);
+                    continue;
+                }
+                break;
+            }
+            case SCRIPT_COMMAND_START_WAYPOINTS:
+            {
+                if (tmp.startWaypoints.wpSource > PATH_FROM_SPECIAL)
+                {
+                    sLog.outErrorDb("Table `%s` has datalong = %u in SCRIPT_COMMAND_START_WAYPOINTS for script id %u.", tablename, tmp.startWaypoints.wpSource, tmp.id);
+                    continue;
+                }
+                break;
+            }
+            case SCRIPT_COMMAND_SET_DEFAULT_MOVEMENT:
+            {
+                if (tmp.setDefaultMovement.movementType >= MAX_DB_MOTION_TYPE)
+                {
+                    sLog.outErrorDb("Table `%s` has datalong = %u in SCRIPT_COMMAND_SET_DEFAULT_MOVEMENT for script id %u.", tablename, tmp.setDefaultMovement.movementType, tmp.id);
+                    continue;
+                }
+                break;
+            }
+            case SCRIPT_COMMAND_START_SCRIPT_FOR_ALL:
+            {
+                if (!tmp.startScriptForAll.searchRadius)
+                {
+                    sLog.outErrorDb("Table `%s` has datalong4 = %u in SCRIPT_COMMAND_START_SCRIPT_FOR_ALL for script id %u.", tablename, tmp.startScriptForAll.searchRadius, tmp.id);
+                    continue;
+                }
+                switch (tmp.startScriptForAll.objectType)
+                {
+                    case SO_STARTFORALL_GAMEOBJECTS:
+                    {
+                        if (tmp.startScriptForAll.objectEntry)
+                        {
+                            if (!ObjectMgr::GetGameObjectInfo(tmp.startScriptForAll.objectEntry))
+                            {
+                                if (!sObjectMgr.IsExistingGameObjectId(tmp.startScriptForAll.objectEntry))
+                                {
+                                    sLog.outErrorDb("Table `%s` has gameobject with invalid entry (datalong3: %u) in SCRIPT_COMMAND_START_SCRIPT_FOR_ALL for script id %u", tablename, tmp.startScriptForAll.objectEntry, tmp.id);
+                                    continue;
+                                }
+                                else
+                                    DisableScriptAction(tmp);
+                            }
+                        }
+                        break;
+                    }
+                    case SO_STARTFORALL_CREATURES:
+                    {
+                        if (tmp.startScriptForAll.objectEntry)
+                        {
+                            if (!ObjectMgr::GetCreatureTemplate(tmp.startScriptForAll.objectEntry))
+                            {
+                                if (!sObjectMgr.IsExistingCreatureId(tmp.startScriptForAll.objectEntry))
+                                {
+                                    sLog.outErrorDb("Table `%s` has invalid creature (datalong3: %u) in SCRIPT_COMMAND_START_SCRIPT_FOR_ALL for script id %u", tablename, tmp.startScriptForAll.objectEntry, tmp.id);
+                                    continue;
+                                }
+                                else
+                                    DisableScriptAction(tmp);
+                            }
+                        }
+                        break;
+                    }
+                    case SO_STARTFORALL_UNITS:
+                    case SO_STARTFORALL_PLAYERS:
+                    {
+                        break;
+                    } 
+                    default:
+                    {
+                        sLog.outErrorDb("Table `%s` has datalong2 = %u in SCRIPT_COMMAND_START_SCRIPT_FOR_ALL for script id %u.", tablename, tmp.startScriptForAll.objectType, tmp.id);
+                        continue;
+                    }
+                }
+                break;
+            }
+            case SCRIPT_COMMAND_FAIL_QUEST:
+            {
+                if (!sObjectMgr.GetQuestTemplate(tmp.failQuest.questId))
+                {
+                    if (!sObjectMgr.IsExistingQuestId(tmp.failQuest.questId))
+                    {
+                        sLog.outErrorDb("Table `%s` has invalid quest (ID: %u) in SCRIPT_COMMAND_FAIL_QUEST in `datalong` for script id %u", tablename, tmp.failQuest.questId, tmp.id);
+                        continue;
+                    }
+                    else
+                    {
+                        DisableScriptAction(tmp);
+                        break;
                     }
                 }
                 break;
@@ -2025,6 +2125,7 @@ void ScriptMgr::CollectPossibleEventIds(std::set<uint32>& eventIds)
 
     for (uint8 i = 0; i < 9; i++)
     {
+        // From SCRIPT_COMMAND_START_SCRIPT.
         result = WorldDatabase.PQuery("SELECT datalong, datalong2, datalong3, datalong4 FROM %s WHERE command=39", script_tables[i]);
 
         if (result)
@@ -2044,6 +2145,54 @@ void ScriptMgr::CollectPossibleEventIds(std::set<uint32>& eventIds)
                 uint32 event4 = fields[3].GetUInt32();
                 if (event4)
                     eventIds.insert(event4);
+            } while (result->NextRow());
+            delete result;
+        }
+
+        // From SCRIPT_COMMAND_TEMP_SUMMON_CREATURE.
+        result = WorldDatabase.PQuery("SELECT dataint2 FROM %s WHERE command=10 && dataint2!=0", script_tables[i]);
+
+        if (result)
+        {
+            do
+            {
+                fields = result->Fetch();
+                uint32 event1 = fields[0].GetUInt32();
+                if (event1)
+                    eventIds.insert(event1);
+            } while (result->NextRow());
+            delete result;
+        }
+
+        // From SCRIPT_COMMAND_START_SCRIPT_FOR_ALL.
+        result = WorldDatabase.PQuery("SELECT datalong FROM %s WHERE command=68", script_tables[i]);
+
+        if (result)
+        {
+            do
+            {
+                fields = result->Fetch();
+                uint32 event1 = fields[0].GetUInt32();
+                if (event1)
+                    eventIds.insert(event1);
+            } while (result->NextRow());
+            delete result;
+        }
+
+        // From SCRIPT_COMMAND_START_MAP_EVENT, SCRIPT_COMMAND_ADD_MAP_EVENT_TARGET and SCRIPT_COMMAND_EDIT_MAP_EVENT.
+        result = WorldDatabase.PQuery("SELECT dataint2, dataint4 FROM %s WHERE command IN (61, 63, 69)", script_tables[i]);
+
+        if (result)
+        {
+            do
+            {
+                fields = result->Fetch();
+                uint32 event1 = fields[0].GetUInt32();
+                if (event1)
+                    eventIds.insert(event1);
+                uint32 event2 = fields[1].GetUInt32();
+                if (event2)
+                    eventIds.insert(event2);
             } while (result->NextRow());
             delete result;
         }
@@ -2344,4 +2493,84 @@ void ScriptMgr::FillSpellSummary()
                 m_spellSummary[i].Effects |= 1 << (SELECT_EFFECT_AURA - 1);
         }
     }
+}
+
+// Returns a target based on the type specified.
+WorldObject* GetTargetByType(WorldObject* pSource, WorldObject* pTarget, uint8 TargetType, uint32 Param1, uint32 Param2)
+{
+    switch (TargetType)
+    {
+        case TARGET_T_PROVIDED_TARGET:
+            return pTarget;
+        case TARGET_T_HOSTILE:
+            if (Unit* pUnitSource = ToUnit(pSource))
+                return pUnitSource->getVictim();
+            break;
+        case TARGET_T_HOSTILE_SECOND_AGGRO:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->SelectAttackingTarget(ATTACKING_TARGET_TOPAGGRO, 1);
+            break;
+        case TARGET_T_HOSTILE_LAST_AGGRO:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->SelectAttackingTarget(ATTACKING_TARGET_BOTTOMAGGRO, 0);
+            break;
+        case TARGET_T_HOSTILE_RANDOM:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->SelectAttackingTarget(ATTACKING_TARGET_RANDOM, 0);
+            break;
+        case TARGET_T_HOSTILE_RANDOM_NOT_TOP:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->SelectAttackingTarget(ATTACKING_TARGET_RANDOM, 1);
+            break;
+        case TARGET_T_OWNER_OR_SELF:
+            if (Unit* pUnitSource = ToUnit(pSource))
+                return pUnitSource->GetCharmerOrOwnerOrSelf();
+            break;
+        case TARGET_T_OWNER:
+            if (Unit* pUnitSource = ToUnit(pSource))
+                return pUnitSource->GetOwner();
+            break;
+        case TARGET_T_FRIENDLY:
+            if (Unit* pUnitSource = ToUnit(pSource))
+                return pUnitSource->SelectRandomFriendlyTarget(Param2 ? ToUnit(pTarget) : nullptr, Param1 ? Param1 : 30.0f, true);
+            break;
+        case TARGET_T_FRIENDLY_INJURED:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->DoSelectLowestHpFriendly(Param1 ? Param1 : 30.0f, Param2 ? Param2 : 50, true);
+            break;
+        case TARGET_T_FRIENDLY_INJURED_EXCEPT:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->DoSelectLowestHpFriendly(Param1 ? Param1 : 30.0f, Param2 ? Param2 : 50, true, ToUnit(pTarget));
+            break;
+        case TARGET_T_FRIENDLY_MISSING_BUFF:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->DoFindFriendlyMissingBuff(Param1 ? Param1 : 30.0f, Param2);
+            break;
+        case TARGET_T_FRIENDLY_MISSING_BUFF_EXCEPT:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->DoFindFriendlyMissingBuff(Param1 ? Param1 : 30.0f, Param2, ToUnit(pTarget));
+            break;
+        case TARGET_T_FRIENDLY_CC:
+            if (Creature* pCreatureSource = ToCreature(pSource))
+                return pCreatureSource->DoFindFriendlyCC(Param1 ? Param1 : 30.0f);
+            break;
+        case TARGET_T_MAP_EVENT_SOURCE:
+            if (Map* pMap = pSource ? pSource->GetMap() : (pTarget ? pTarget->GetMap() : nullptr))
+                if (const ScriptedEvent* pEvent = pMap->GetScriptedMapEvent(Param1))
+                    return pEvent->m_pSource;
+            break;
+        case TARGET_T_MAP_EVENT_TARGET:
+            if (Map* pMap = pSource ? pSource->GetMap() : (pTarget ? pTarget->GetMap() : nullptr))
+                if (const ScriptedEvent* pEvent = pMap->GetScriptedMapEvent(Param1))
+                    return pEvent->m_pTarget;
+            break;
+        case TARGET_T_MAP_EVENT_EXTRA_TARGET:
+            if (Map* pMap = pSource ? pSource->GetMap() : (pTarget ? pTarget->GetMap() : nullptr))
+                if (const ScriptedEvent* pEvent = pMap->GetScriptedMapEvent(Param1))
+                    for (const auto& target : pEvent->m_vTargets)
+                        if (target.pObject && (target.pObject->GetEntry() == Param2))
+                            return target.pObject;
+            break;
+    }
+    return nullptr;
 }

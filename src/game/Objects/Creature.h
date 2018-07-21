@@ -65,6 +65,7 @@ enum CreatureFlagsExtra
     CREATURE_FLAG_EXTRA_ALWAYS_CRUSH                 = 0x00002000,       // creature always roll a crushing melee outcome when not miss/crit/dodge/parry/block
     CREATURE_FLAG_EXTRA_IMMUNE_AOE                   = 0x00004000,       // creature is immune to AoE
     CREATURE_FLAG_EXTRA_CHASE_GEN_NO_BACKING         = 0x00008000,       // creature does not move back when target is within bounding radius
+    CREATURE_FLAG_EXTRA_NO_ASSIST                    = 0x00010000,       // creature does not aggro when nearby creatures aggro
 };
 
 // GCC have alternative #pragma pack(N) syntax and old gcc version not support pack(push,N), also any gcc version not support it at some platform
@@ -511,6 +512,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         void SetHomePosition(float x, float y, float z, float o);
         void GetHomePosition(float &x, float &y, float &z, float &o, float* dist = nullptr);
         float GetHomePositionO() const { return m_HomeOrientation; }
+        void ResetHomePosition();
 
         CreatureSubtype GetSubtype() const { return m_subtype; }
         bool IsPet() const { return m_subtype == CREATURE_SUBTYPE_PET; }
@@ -574,6 +576,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         bool IsInEvadeMode() const;
 
         bool AIM_Initialize();
+        void SetAI(CreatureAI * ai) { i_AI = ai; }
 
         CreatureAI* AI() { return i_AI; }
         CreatureAI const* AI() const { return i_AI; }
@@ -678,6 +681,9 @@ class MANGOS_DLL_SPEC Creature : public Unit
         bool CanAssistTo(const Unit* u, const Unit* enemy, bool checkfaction = true) const;
         bool CanInitiateAttack();
 
+        uint32 GetDefaultMount() { return m_mountId; }
+        void SetDefaultMount(uint32 id) { m_mountId = id; }
+        
         void SetTauntImmunity(bool immune);
 
         MovementGeneratorType GetDefaultMovementType() const { return m_defaultMovementType; }
@@ -813,6 +819,8 @@ class MANGOS_DLL_SPEC Creature : public Unit
         bool _manaRegen;
         uint32 m_manaRegen;
 
+        uint32 m_startwaypoint;                             // currentwaypoint from creature table
+
         void RegenerateHealth();
         void RegenerateMana();
 
@@ -856,6 +864,9 @@ class MANGOS_DLL_SPEC Creature : public Unit
         // (msecs)timer used for group loot
         uint32 GetGroupLootTimer() { return m_groupLootTimer; }
 
+        void SetEscortable(bool escortable) { _isEscortable = escortable; }
+        bool IsEscortable() const { return _isEscortable; }
+
     protected:
         bool MeetsSelectAttackingRequirement(Unit* pTarget, SpellEntry const* pSpellInfo, uint32 selectFlags) const;
 
@@ -894,6 +905,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         MovementGeneratorType m_defaultMovementType;
         Cell m_currentCell;                                 // store current cell where creature listed
         uint32 m_equipmentId;
+        uint32 m_mountId;                                   // display Id to mount
 
         // below fields has potential for optimization
         bool m_AlreadyCallAssistance;
@@ -929,6 +941,8 @@ class MANGOS_DLL_SPEC Creature : public Unit
         uint32 _nonPlayerDamageTaken;
         
         float m_callForHelpDist;
+
+        bool _isEscortable;
 
     private:
         GridReference<Creature> m_gridRef;

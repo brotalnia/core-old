@@ -28,6 +28,8 @@
 #include "World.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "Guild.h"
+#include "GuildMgr.h"
 #include "Opcodes.h"
 #include "Chat.h"
 #include "Log.h"
@@ -41,6 +43,7 @@
 #include "Anticheat.h"
 #include "SQLStorages.h"
 #include "AsyncCommandHandlers.h"
+#include "WaypointMovementGenerator.h"
 #ifdef _DEBUG_VMAPS
 #include "VMapFactory.h"
 #endif
@@ -1141,6 +1144,50 @@ bool ChatHandler::HandleModifyBWalkCommand(char* args)
     return true;
 }
 
+//Edit Player Fly Speed, works only while taxi flying
+bool ChatHandler::HandleModifyFlyCommand(char* args)
+{
+    if (!*args)
+        return false;
+
+    float modSpeed = (float)atof(args);
+
+    if (modSpeed > 100.0f || modSpeed < 0.1f)
+    {
+        SendSysMessage(LANG_BAD_VALUE);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    Player *chr = getSelectedPlayer();
+    if (!chr)
+        chr = m_session->GetPlayer();
+    if (!chr)
+    {
+        SendSysMessage(LANG_NO_CHAR_SELECTED);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    // check online security
+    if (HasLowerSecurity(chr))
+        return false;
+
+    if (!chr->IsTaxiFlying())
+        return false;
+
+    std::string chrNameLink = GetNameLink(chr);
+
+    PSendSysMessage(LANG_YOU_CHANGE_FLY_SPEED, modSpeed, chrNameLink.c_str());
+    if (needReportToTarget(chr))
+        ChatHandler(chr).PSendSysMessage(LANG_YOURS_FLY_SPEED_CHANGED, GetNameLink().c_str(), modSpeed);
+
+    FlightPathMovementGenerator* flight = (FlightPathMovementGenerator*)(chr->GetMotionMaster()->top());
+    flight->Reset(*chr, modSpeed);
+
+    return true;
+}
+
 //Edit Player Scale
 bool ChatHandler::HandleModifyScaleCommand(char* args)
 {
@@ -1606,6 +1653,37 @@ bool ChatHandler::HandleLookupTeleCommand(char * args)
         SendSysMessage(LANG_COMMAND_TELE_NOLOCATION);
     else
         PSendSysMessage(LANG_COMMAND_TELE_LOCATION, reply.str().c_str());
+
+    return true;
+}
+
+bool ChatHandler::HandleLookupGuildCommand(char* args)
+{
+    if (!args || !*args)
+        return false;
+
+    char* name = ExtractQuotedArg(&args);
+    if (!name)
+        return false;
+
+    std::string nameStr(name);
+    Guild* guild = sGuildMgr.GetGuildByName(nameStr);
+    if (!guild)
+    {
+        SendSysMessage(LANG_GUILD_NOT_FOUND);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    PSendSysMessage("Guild %s (ID %u):", guild->GetName().c_str(), guild->GetId());
+    std::string leaderName;
+    sObjectMgr.GetPlayerNameByGUID(guild->GetLeaderGuid(), leaderName);
+    PSendSysMessage("- Leader: %s, created: %u-%u-%u", leaderName.c_str(),
+        guild->GetCreatedYear(), guild->GetCreatedMonth(),
+        guild->GetCreatedDay());
+    PSendSysMessage("- Members: %u (%u accounts)", guild->GetMemberSize(), guild->GetAccountsNumber());
+    PSendSysMessage("- MOTD: %s", guild->GetMOTD().c_str());
+    PSendSysMessage("- INFO: %s", guild->GetGINFO().c_str());
 
     return true;
 }

@@ -87,8 +87,6 @@ void AddSC_instance_blackwing_lair();
 void AddSC_deadmines();                              //deadmines
 void AddSC_instance_deadmines();
 void AddSC_boss_mr_smite();
-//void AddSC_boss_sneed_shredder();
-//void AddSC_boss_sneed();
 
 void AddSC_gnomeregan();                             //gnomeregan
 void AddSC_boss_thermaplugg();
@@ -147,7 +145,6 @@ void AddSC_boss_vectus();
 //void AddSC_boss_lordblackwood();
 void AddSC_scholo_trash();
 void AddSC_instance_scholomance();
-void AddSC_shadowfang_keep();                        //shadowfang_keep
 void AddSC_instance_shadowfang_keep();
 void AddSC_boss_magistrate_barthilas();              //stratholme
 void AddSC_boss_maleki_the_pallid();
@@ -207,7 +204,6 @@ void AddSC_swamp_of_sorrows();
 void AddSC_tirisfal_glades();
 void AddSC_undercity();
 void AddSC_western_plaguelands();
-void AddSC_quest_in_dreams();
 void AddSC_westfall();
 void AddSC_wetlands();
 
@@ -363,8 +359,6 @@ void AddScripts()
     AddSC_deadmines();                                      //deadmines
     AddSC_instance_deadmines();
     AddSC_boss_mr_smite();
-    //AddSC_boss_sneed_shredder();
-    //AddSC_boss_sneed();
     AddSC_gnomeregan();                                     //gnomeregan
     AddSC_boss_thermaplugg();
     AddSC_instance_gnomeregan();
@@ -421,7 +415,6 @@ void AddScripts()
     //AddSC_boss_lordblackwood();
     AddSC_scholo_trash();
     AddSC_instance_scholomance();
-    AddSC_shadowfang_keep();                                //shadowfang_keep
     AddSC_instance_shadowfang_keep();
     AddSC_boss_magistrate_barthilas();                      //stratholme
     AddSC_boss_maleki_the_pallid();
@@ -481,7 +474,6 @@ void AddScripts()
     AddSC_tirisfal_glades();
     AddSC_undercity();
     AddSC_western_plaguelands();
-    AddSC_quest_in_dreams();
     AddSC_westfall();
     AddSC_wetlands();
 

@@ -497,7 +497,7 @@ enum UnitFlags
     UNIT_FLAG_PET_RENAME            = 0x00000010,           // Old pet rename: moved to UNIT_FIELD_BYTES_2,2 in TBC+
     UNIT_FLAG_PET_ABANDON           = 0x00000020,           // Old pet abandon: moved to UNIT_FIELD_BYTES_2,2 in TBC+
     UNIT_FLAG_UNK_6                 = 0x00000040,
-    UNIT_FLAG_OOC_NOT_ATTACKABLE    = 0x00000100,           // (OOC Out Of Combat) Can not be attacked when not in combat. Removed if unit for some reason enter combat (flag probably removed for the attacked and it's party/group only)
+    UNIT_FLAG_IMMUNE_TO_PLAYER      = 0x00000100,           // Target is immune to players
     UNIT_FLAG_PASSIVE               = 0x00000200,           // makes you unable to attack everything. Almost identical to our "civilian"-term. Will ignore it's surroundings and not engage in combat unless "called upon" or engaged by another unit.
     UNIT_FLAG_PVP                   = 0x00001000,
     UNIT_FLAG_SILENCED              = 0x00002000,           // silenced, 2.1.1
@@ -549,6 +549,16 @@ enum NPCFlags
     UNIT_NPC_FLAG_STABLEMASTER          = 0x00002000,       // 100%
     UNIT_NPC_FLAG_REPAIR                = 0x00004000,       // 100%
     UNIT_NPC_FLAG_OUTDOORPVP            = 0x20000000,       // custom flag for outdoor pvp creatures || Custom flag
+};
+
+enum AutoAttackCheckResult
+{
+    ATTACK_RESULT_OK = 0,
+    ATTACK_RESULT_NOT_IN_RANGE = 1,
+    ATTACK_RESULT_BAD_FACING = 2,
+    ATTACK_RESULT_CANT_ATTACK = 3,
+    ATTACK_RESULT_DEAD = 4,
+    ATTACK_RESULT_FRIENDLY_TARGET = 5,
 };
 
 namespace Movement
@@ -998,6 +1008,8 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         bool isAttackReady(WeaponAttackType type = BASE_ATTACK) const;
         bool haveOffhandWeapon() const;
         bool UpdateMeleeAttackingState();
+        void DelayAutoAttacks();
+        virtual AutoAttackCheckResult CanAutoAttackTarget(Unit const*) const;
         bool CanUseEquippedWeapon(WeaponAttackType attackType) const
         {
             if (IsInFeralForm())
@@ -1294,9 +1306,8 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         void RemoveFearEffectsByDamageTaken(uint32 damage, uint32 exceptSpellId, DamageEffectType damagetype);
 
         bool IsValidAttackTarget(Unit const* target) const;
-        bool _IsValidAttackTarget(Unit const* target, SpellEntry const* bySpell = nullptr, WorldObject const* obj = nullptr) const;
-        bool isTargetableForAttack(bool inversAlive = false) const;
-        bool isAttackableByAOE(bool requireDeadTarget = false) const;
+        bool isTargetableForAttack(bool inversAlive = false, bool isAttackerPlayer = false) const;
+        bool isAttackableByAOE(bool requireDeadTarget = false, bool isCasterPlayer = false) const;
         bool isPassiveToHostile() const { return HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PASSIVE); }
 
         virtual bool IsInWater() const;
@@ -1364,6 +1375,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         void SetCharmGuid(ObjectGuid charm) { SetGuidValue(UNIT_FIELD_CHARM, charm); }
         ObjectGuid const& GetTargetGuid() const { return GetGuidValue(UNIT_FIELD_TARGET); }
         void SetTargetGuid(ObjectGuid targetGuid) { SetGuidValue(UNIT_FIELD_TARGET, targetGuid); }
+        void ClearTarget() { SetTargetGuid(ObjectGuid()); }
         ObjectGuid const& GetChannelObjectGuid() const { return GetGuidValue(UNIT_FIELD_CHANNEL_OBJECT); }
         void SetChannelObjectGuid(ObjectGuid targetGuid) { SetGuidValue(UNIT_FIELD_CHANNEL_OBJECT, targetGuid); }
 

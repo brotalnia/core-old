@@ -46,7 +46,6 @@
 class Object;
 class WorldSession;
 class Player;
-class Weather;
 class SqlResultQueue;
 class QueryResult;
 class World;
@@ -81,13 +80,12 @@ enum ShutdownExitCode
 enum WorldTimers
 {
     WUPDATE_AUCTIONS    = 0,
-    WUPDATE_WEATHERS    = 1,
-    WUPDATE_UPTIME      = 2,
-    WUPDATE_CORPSES     = 3,
-    WUPDATE_EVENTS      = 4,
-    WUPDATE_SAVE_VAR    = 5,
-    WUPDATE_GROUPS      = 6,
-    WUPDATE_COUNT       = 7
+    WUPDATE_UPTIME      = 1,
+    WUPDATE_CORPSES     = 2,
+    WUPDATE_EVENTS      = 3,
+    WUPDATE_SAVE_VAR    = 4,
+    WUPDATE_GROUPS      = 5,
+    WUPDATE_COUNT       = 6
 };
 
 /// Configuration elements
@@ -129,6 +127,8 @@ enum eConfigUInt32Values
     CONFIG_UINT32_DYN_RESPAWN_PLAYERS_THRESHOLD,
     CONFIG_UINT32_DYN_RESPAWN_PLAYERS_LEVELDIFF,
     CONFIG_UINT32_DYN_RESPAWN_MIN_RESPAWN_TIME,
+    CONFIG_UINT32_DYN_RESPAWN_MIN_RESPAWN_TIME_ELITE,
+    CONFIG_UINT32_DYN_RESPAWN_MIN_RESPAWN_TIME_INDOORS,
     CONFIG_UINT32_DYN_RESPAWN_AFFECT_RESPAWN_TIME_BELOW,
     CONFIG_UINT32_DYN_RESPAWN_AFFECT_LEVEL_BELOW,
     CONFIG_UINT32_MTCELLS_THREADS,
@@ -461,8 +461,15 @@ enum eConfigBoolValues
     CONFIG_BOOL_ACCURATE_PVP_EQUIP_REQUIREMENTS,
     CONFIG_BOOL_ACCURATE_PVP_PURCHASE_REQUIREMENTS,
     CONFIG_BOOL_ACCURATE_PVP_ZONE_REQUIREMENTS,
+    CONFIG_BOOL_ACCURATE_PVP_TIMELINE,
+    CONFIG_BOOL_ACCURATE_PVP_REWARDS,
     CONFIG_BOOL_BATTLEGROUND_RANDOMIZE,
     CONFIG_BOOL_SEND_LOOT_ROLL_UPON_RECONNECT,
+    CONFIG_BOOL_ACCURATE_MOUNTS,
+    CONFIG_BOOL_ACCURATE_PETS,
+    CONFIG_BOOL_ACCURATE_SPELL_EFFECTS,
+    CONFIG_BOOL_ACCURATE_PVE_EVENTS,
+    CONFIG_BOOL_ACCURATE_LFG,
     CONFIG_BOOL_VALUE_COUNT
 };
 
@@ -610,11 +617,6 @@ class World
         /// Get the maximum number of parallel sessions on the server since last reboot
         uint32 GetMaxQueuedSessionCount() const { return m_maxQueuedSessionCount; }
         uint32 GetMaxActiveSessionCount() const { return m_maxActiveSessionCount; }
-        Player* FindPlayerInZone(uint32 zone);
-
-        Weather* FindWeather(uint32 id) const;
-        Weather* AddWeather(uint32 zone_id);
-        void RemoveWeather(uint32 zone_id);
 
         /// Get the active session server limit (or security level limitations)
         uint32 GetPlayerAmountLimit() const { return m_playerLimit >= 0 ? m_playerLimit : 0; }
@@ -734,7 +736,7 @@ class World
         void WarnAccount(uint32 accountId, std::string from, std::string reason, const char* type = "WARNING");
         void BanAccount(uint32 accountId, uint32 duration, std::string reason, std::string author);
         BanReturn BanAccount(BanMode mode, std::string nameOrIP, uint32 duration_secs, std::string reason, std::string author);
-        bool RemoveBanAccount(BanMode mode, std::string nameOrIP);
+        bool RemoveBanAccount(BanMode mode, const std::string& source, const std::string& message, std::string nameOrIP);
 
         // for max speed access
         static float GetMaxVisibleDistanceOnContinents()    { return m_MaxVisibleDistanceOnContinents; }
@@ -850,8 +852,6 @@ class World
         int32  m_timeZoneOffset;
         IntervalTimer m_timers[WUPDATE_COUNT];
 
-        typedef UNORDERED_MAP<uint32, Weather*> WeatherMap;
-        WeatherMap m_weathers;
         SessionMap m_sessions;
         SessionSet m_disconnectedSessions;
         std::map<uint32 /*accountId*/, time_t /*last logout*/> m_accountsLastLogout;

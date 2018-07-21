@@ -227,12 +227,13 @@ bool PlayerTaxi::LoadTaxiDestinationsFromString(const std::string& values, Team 
 
 std::string PlayerTaxi::SaveTaxiDestinationsToString() const
 {
-    if (m_TaxiDestinations.empty())
+    if (m_TaxiDestinations.size() < 2)
         return "";
 
     std::ostringstream ss;
 
-    for (size_t i = 0; i < m_TaxiDestinations.size(); ++i)
+    // save only the current path
+    for (size_t i = 0; i < 2; ++i)
         ss << m_TaxiDestinations[i] << " ";
 
     return ss.str();
@@ -249,6 +250,19 @@ uint32 PlayerTaxi::GetCurrentTaxiPath() const
     sObjectMgr.GetTaxiPath(m_TaxiDestinations[0], m_TaxiDestinations[1], path, cost);
 
     return path;
+}
+
+uint32 PlayerTaxi::GetCurrentTaxiCost() const
+{
+    if (m_TaxiDestinations.size() < 2)
+        return 0;
+
+    uint32 path;
+    uint32 cost;
+
+    sObjectMgr.GetTaxiPath(m_TaxiDestinations[0], m_TaxiDestinations[1], path, cost);
+
+    return (uint32)ceil(cost * m_discount);
 }
 
 std::ostringstream& operator<< (std::ostringstream& ss, PlayerTaxi const& taxi)
@@ -504,7 +518,7 @@ Player::Player(WorldSession *session) : Unit(),
     m_deathTimer = 0;
     m_deathExpireTime = 0;
 
-    m_swingErrorMsg = 0;
+    m_swingErrorMsg = ATTACK_RESULT_OK;
 
     for (int j = 0; j < PLAYER_MAX_BATTLEGROUND_QUEUES; ++j)
     {
@@ -695,7 +709,13 @@ bool Player::Create(uint32 guidlow, const std::string& name, uint8 race, uint8 c
 
     SetByteValue(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_UNK3 | UNIT_BYTE2_FLAG_UNK5 | UNIT_BYTE2_FLAG_PVP);
     SetUInt32Value(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE);
-    SetFloatValue(UNIT_MOD_CAST_SPEED, 1.0f);               // fix cast time showed in spell tooltip on client
+
+    // fix cast time showed in spell tooltip on client
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
+    SetFloatValue(UNIT_MOD_CAST_SPEED, 1.0f);
+#else
+    SetInt32Value(UNIT_MOD_CAST_SPEED, 0);
+#endif
 
     SetInt32Value(PLAYER_FIELD_WATCHED_FACTION_INDEX, -1);  // -1 is default value
 
@@ -1166,6 +1186,14 @@ struct UpdateAttackersCombatHelper
     }
     Player* player;
 };
+
+AutoAttackCheckResult Player::CanAutoAttackTarget(Unit const* pVictim) const
+{
+    if (!IsValidAttackTarget(pVictim))
+        return ATTACK_RESULT_FRIENDLY_TARGET;
+
+    return Unit::CanAutoAttackTarget(pVictim);
+}
 
 void Player::Update(uint32 update_diff, uint32 p_time)
 {
@@ -2238,6 +2266,8 @@ void Player::RemoveFromWorld()
     if (IsInWorld())
         GetCamera().ResetView();
 
+    SetEscortingGuid(ObjectGuid());
+
     Unit::RemoveFromWorld();
 }
 
@@ -2826,13 +2856,17 @@ void Player::GiveLevel(uint32 level)
     PlayerClassLevelInfo classInfo;
     sObjectMgr.GetPlayerClassLevelInfo(getClass(), level, &classInfo);
 
+    uint32 hp = uint32((int32(classInfo.basehealth) - int32(GetCreateHealth()))
+        + (int32(GetHealthBonusFromStamina(info.stats[STAT_STAMINA])) - int32(GetHealthBonusFromStamina(GetCreateStat(STAT_STAMINA)))));
+
+    uint32 mana = uint32((int32(classInfo.basemana) - int32(GetCreateMana()))
+        + (int32(GetManaBonusFromIntellect(info.stats[STAT_INTELLECT])) - int32(GetManaBonusFromIntellect(GetCreateStat(STAT_INTELLECT)))));
+
     // send levelup info to client
     WorldPacket data(SMSG_LEVELUP_INFO, (4 + 4 + MAX_POWERS * 4 + MAX_STATS * 4));
     data << uint32(level);
-    data << uint32((int32(classInfo.basehealth) - int32(GetCreateHealth()))
-        + ((int32(info.stats[STAT_STAMINA]) - GetCreateStat(STAT_STAMINA)) * 10));
-    // for(int i = 0; i < MAX_POWERS; ++i)                  // Powers loop (0-6)
-    data << uint32(int32(classInfo.basemana)   - int32(GetCreateMana()));
+    data << hp;
+    data << uint32(getPowerType() == POWER_MANA ? mana : 0);
     data << uint32(0);
     data << uint32(0);
     data << uint32(0);
@@ -2938,7 +2972,11 @@ void Player::InitStatsForLevel(bool reapplyMods)
     UpdateSkillsForLevel();
 
     // set default cast time multiplier
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
     SetFloatValue(UNIT_MOD_CAST_SPEED, 1.0f);
+#else
+    SetInt32Value(UNIT_MOD_CAST_SPEED, 0);
+#endif
 
     // save base values (bonuses already included in stored stats)
     for (int i = STAT_STRENGTH; i < MAX_STATS; ++i)
@@ -3031,7 +3069,7 @@ void Player::InitStatsForLevel(bool reapplyMods)
     // cleanup unit flags (will be re-applied if need at aura load).
     RemoveFlag(UNIT_FIELD_FLAGS,
                UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_DISABLE_MOVE | UNIT_FLAG_NOT_ATTACKABLE_1 |
-               UNIT_FLAG_OOC_NOT_ATTACKABLE | UNIT_FLAG_PASSIVE  | UNIT_FLAG_LOOTING          |
+               UNIT_FLAG_IMMUNE_TO_PLAYER | UNIT_FLAG_PASSIVE  | UNIT_FLAG_LOOTING          |
                UNIT_FLAG_PET_IN_COMBAT  | UNIT_FLAG_SILENCED     | UNIT_FLAG_PACIFIED         |
                UNIT_FLAG_STUNNED        | UNIT_FLAG_IN_COMBAT    | UNIT_FLAG_DISARMED         |
                UNIT_FLAG_CONFUSED       | UNIT_FLAG_FLEEING      | UNIT_FLAG_NOT_SELECTABLE   |
@@ -3045,7 +3083,9 @@ void Player::InitStatsForLevel(bool reapplyMods)
     RemoveByteFlag(UNIT_FIELD_BYTES_1, 3, UNIT_BYTE1_FLAG_ALL);
 
     // restore if need some important flags
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
     SetUInt32Value(PLAYER_FIELD_BYTES2, 0);                 // flags empty by default
+#endif
 
     if (reapplyMods)                                        //reapply stats values only on .reset stats (level) command
         _ApplyAllStatBonuses();
@@ -4065,9 +4105,10 @@ void Player::InitVisibleBits()
     updateVisualBits.SetBit(PLAYER_GUILD_TIMESTAMP);
 
     // PLAYER_QUEST_LOG_x also visible bit on official (but only on party/raid)...
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
     for (uint16 i = PLAYER_QUEST_LOG_1_1; i < PLAYER_QUEST_LOG_LAST_3; i += MAX_QUEST_OFFSET)
         updateVisualBits.SetBit(i);
-
+#endif
     //Players visible items are not inventory stuff
     //431) = 884 (0x374) = main weapon
     for (uint16 i = 0; i < EQUIPMENT_SLOT_END; i++)
@@ -6537,13 +6578,8 @@ void Player::UpdateZone(uint32 newZone, uint32 newArea)
 
         if (sWorld.getConfig(CONFIG_BOOL_WEATHER))
         {
-            if (Weather *wth = sWorld.FindWeather(zoneEntry->Id))
-                wth->SendWeatherUpdateToPlayer(this);
-            else if (!sWorld.AddWeather(zoneEntry->Id))
-            {
-                // send fine weather packet to remove old zone's weather
-                Weather::SendFineWeatherUpdateToPlayer(this);
-            }
+            Weather* wth = GetMap()->GetWeatherSystem()->FindOrCreateWeather(newZone);
+            wth->SendWeatherUpdateToPlayer(this);
         }
     }
 
@@ -10039,9 +10075,12 @@ InventoryResult Player::CanUseItem(Item *pItem, bool not_loading) const
             if (msg != EQUIP_ERR_OK)
                 return msg;
 
-            if (pItem->GetSkill() != 0)
+            if (uint32 skill = pItem->GetSkill())
             {
-                if (GetSkillValue(pItem->GetSkill()) == 0)
+                // Fist weapons use unarmed skill calculations, but we must query fist weapon skill presence to use this item
+                if (pProto->SubClass == ITEM_SUBCLASS_WEAPON_FIST)
+                    skill = SKILL_FIST_WEAPONS;
+                if (!GetSkillValue(skill))
                     return EQUIP_ERR_NO_REQUIRED_PROFICIENCY;
             }
 
@@ -10074,14 +10113,7 @@ InventoryResult Player::CanUseItem(ItemPrototype const *pProto, bool not_loading
         if (pProto->RequiredSpell != 0 && !HasSpell(pProto->RequiredSpell))
             return EQUIP_ERR_NO_REQUIRED_PROFICIENCY;
 
-
-        auto playerRank = m_honorMgr.GetHighestRank().rank;
-
-        if (sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_EQUIP_REQUIREMENTS)
-            && sWorld.GetWowPatch() < WOW_PATCH_106)
-        {
-            playerRank = m_honorMgr.GetRank().rank;
-        }
+        auto playerRank = (sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_EQUIP_REQUIREMENTS) && sWorld.GetWowPatch() < WOW_PATCH_106) ? m_honorMgr.GetRank().rank : m_honorMgr.GetHighestRank().rank;
 
         if (not_loading && playerRank < (uint8)pProto->RequiredHonorRank)
             return EQUIP_ERR_CANT_EQUIP_RANK;
@@ -14965,7 +14997,9 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder *holder)
     sBattleGroundMgr.PlayerLoggedIn(this); // Add to BG queue if needed
     CreatePacketBroadcaster();
 
-    if (sWorld.GetWowPatch() >= WOW_PATCH_112)
+    // Note, if not using accurate mounts be sure to update all trainer spells in the
+    // database or players will be stuck with the old skill system
+    if (sWorld.GetWowPatch() >= WOW_PATCH_112 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_MOUNTS))
         UpdateOldRidingSkillToNew(has_epic_mount);
 
     return true;
@@ -15030,13 +15064,21 @@ void Player::UpdateOldRidingSkillToNew(bool has_epic_mount)
         has_old_riding_skill = true;
     }
 
+    // Paladin and Warlock level 40 mounts
+    if (HasSpell(13819u) || HasSpell(5784u))
+        has_old_riding_skill = true;
+
+    // Paladin and Warlock level 60 mounts
+    if (HasSpell(23214u) || HasSpell(23161u))
+        has_epic_mount = true;
+
     if (!has_old_riding_skill)
         return;
     
     if (has_epic_mount)
-        learnSpell(33391, false); // Journeyman Riding
+        learnSpell(33391u, false); // Journeyman Riding
     else
-        learnSpell(33388, false); // Apprentice Riding
+        learnSpell(33388u, false); // Apprentice Riding
 }
 
 void Player::SendPacketsAtRelogin()
@@ -17381,35 +17423,82 @@ bool Player::ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc 
     // 0 element current node
     m_taxi.AddTaxiDestination(sourcenode);
 
+    float discount = npc ? GetReputationPriceDiscount(npc) : 1.0f;
+    m_taxi.SetDiscount(discount);
+
     // fill destinations path tail
     uint32 sourcepath = 0;
+    uint32 sourceCost = 0;
     uint32 totalcost = 0;
-
-    uint32 prevnode = sourcenode;
-    uint32 lastnode = 0;
-
-    for (uint32 i = 1; i < nodes.size(); ++i)
+    uint32 lastPath = 0;
+    uint32 lastNode = nodes[1];
+    sObjectMgr.GetTaxiPath(sourcenode, lastNode, sourcepath, sourceCost);
+    if (!sourcepath)
     {
-        uint32 path, cost;
+        m_taxi.ClearTaxiDestinations();
+        return false;
+    }
+    lastPath = sourcepath;
+    sourceCost = (uint32)ceil(sourceCost * discount);
+    totalcost += sourceCost;
 
-        lastnode = nodes[i];
-        sObjectMgr.GetTaxiPath(prevnode, lastnode, path, cost);
-
-        if (!path)
+    // multiple path
+    if (nodes.size() > 2)
+    {
+        uint32 nextNode = 0;
+        uint32 nextCost = 0;
+        uint32 nextPath = 0;
+        uint32 lastOutNode = 0;
+        for (uint32 nodeIndex = 2; nodeIndex < nodes.size(); ++nodeIndex)
         {
-            m_taxi.ClearTaxiDestinations();
-            return false;
+            nextNode = nodes[nodeIndex];
+            sObjectMgr.GetTaxiPath(lastNode, nextNode, nextPath, nextCost);
+            if (!nextPath)
+            {
+                m_taxi.ClearTaxiDestinations();
+                return false;
+            }
+            totalcost += (uint32)ceil(nextCost * discount);
+
+            // find a transition
+            uint32 inNode = 0;
+            uint32 outNode = 0;
+            bool transitionFound = false;
+            TaxiPathTransitionsMapBounds bounds = sObjectMgr.GetTaxiPathTransitionsMapBounds(lastPath);
+            for (auto it = bounds.first; it != bounds.second; ++it)
+                if (it->second.outPath == nextPath)
+                {
+                    transitionFound = true;
+                    inNode = it->second.inNode;
+                    outNode = it->second.outNode;
+                    break;
+                }
+            if (!transitionFound)
+                sLog.outErrorDb("Table `taxi_path_transitions` is missing a transition between paths %u and %u", lastPath, nextPath);
+
+            // default values in database, init them to n-1 -> 1
+            if (!inNode)
+                inNode = sTaxiPathNodesByPath[lastPath].size() - 2;
+            if (!outNode)
+                outNode = 1;
+
+            // add previous path nodes
+            for (uint32 i = lastOutNode; i <= inNode; ++i)
+                m_taxi.AddTaxiPathNode(sTaxiPathNodesByPath[lastPath][i]);
+            m_taxi.AddTaxiDestination(lastNode);
+
+            lastNode = nextNode;
+            lastPath = nextPath;
+            lastOutNode = outNode;
         }
 
-        totalcost += cost;
-
-        if (prevnode == sourcenode)
-            sourcepath = path;
-
-        m_taxi.AddTaxiDestination(lastnode);
-
-        prevnode = lastnode;
+        // add last path nodes
+        for (int i = lastOutNode; i < sTaxiPathNodesByPath[lastPath].size(); ++i)
+            m_taxi.AddTaxiPathNode(sTaxiPathNodesByPath[lastPath][i]);
+        m_taxi.AddTaxiDestination(lastNode);
     }
+    else // single path
+        m_taxi.AddTaxiDestination(lastNode);
 
     // get mount model (in case non taximaster (npc==NULL) allow more wide lookup)
     uint32 mount_display_id = sObjectMgr.GetTaxiMountDisplayId(sourcenode, GetTeam(), npc == NULL);
@@ -17426,9 +17515,6 @@ bool Player::ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc 
 
     uint32 money = GetMoney();
 
-    if (npc)
-        totalcost = (uint32)ceil(totalcost * GetReputationPriceDiscount(npc));
-
     if (money < totalcost)
     {
         WorldPacket data(SMSG_ACTIVATETAXIREPLY, 4);
@@ -17442,7 +17528,7 @@ bool Player::ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc 
     UpdatePvP(false);
 
     //Checks and preparations done, DO FLIGHT
-    ModifyMoney(-(int32)totalcost);
+    ModifyMoney(-(int32)sourceCost);
 
     // prevent stealth flight
     RemoveSpellsCausingAura(SPELL_AURA_MOD_STEALTH);
@@ -17450,7 +17536,8 @@ bool Player::ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc 
     // reset extraAttacks counter
     ResetExtraAttacks();
 
-    UnsummonPetTemporaryIfAny();
+    if (GetPet())
+        RemovePet(PET_SAVE_REAGENTS);
 
     WorldPacket data(SMSG_ACTIVATETAXIREPLY, 4);
     data << uint32(ERR_TAXIOK);
@@ -18662,8 +18749,9 @@ BattleGroundBracketId Player::GetBattleGroundBracketIdFromLevel(BattleGroundType
 {
     BattleGround *bg = sBattleGroundMgr.GetBattleGroundTemplate(bgTypeId);
     ASSERT(bg);
+
     if (getLevel() < bg->GetMinLevel())
-        return BG_BRACKET_ID_FIRST;
+        return BG_BRACKET_ID_NONE;
 
     uint32 bracket_id = (getLevel() - bg->GetMinLevel()) / 10;
     if (bracket_id > MAX_BATTLEGROUND_BRACKETS)
@@ -20110,7 +20198,7 @@ bool Player::TeleportToHomebind(uint32 options, bool hearthCooldown)
         SpellEntry const *spellInfo = sSpellMgr.GetSpellEntry(8690);
         AddSpellAndCategoryCooldowns(spellInfo, 6948);
     }
-    return TeleportTo(m_homebindMapId, m_homebindX, m_homebindY, m_homebindZ, GetOrientation(), options); 
+    return TeleportTo(m_homebindMapId, m_homebindX, m_homebindY, m_homebindZ, GetOrientation(), (options | TELE_TO_FORCE_MAP_CHANGE));
 }
 
 Object* Player::GetObjectByTypeMask(ObjectGuid guid, TypeMask typemask)
@@ -20819,7 +20907,7 @@ void Player::LootMoney(int32 money, Loot* loot)
 void Player::RewardHonor(Unit* uVictim, uint32 groupSize)
 {
     // Honor System was added in 1.4.
-    if (sWorld.GetWowPatch() < WOW_PATCH_104)
+    if (sWorld.GetWowPatch() < WOW_PATCH_104 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_TIMELINE))
         return;
 
     if (!uVictim)
@@ -20838,7 +20926,7 @@ void Player::RewardHonor(Unit* uVictim, uint32 groupSize)
                 return;
 
             // Dishonorable kills were added in 1.5.
-            if (sWorld.GetWowPatch() < WOW_PATCH_105)
+            if (sWorld.GetWowPatch() < WOW_PATCH_105 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_TIMELINE))
                 return;
 
             m_honorMgr.Add(HonorMgr::DishonorableKillPoints(getLevel()), DISHONORABLE, cVictim);
@@ -20859,7 +20947,7 @@ void Player::RewardHonor(Unit* uVictim, uint32 groupSize)
 void Player::RewardHonorOnDeath()
 {
     // Honor System was added in 1.4.
-    if (sWorld.GetWowPatch() < WOW_PATCH_104)
+    if (sWorld.GetWowPatch() < WOW_PATCH_104 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_TIMELINE))
         return;
 
     if (GetAura(2479, EFFECT_INDEX_0))             // Honorless Target

@@ -64,10 +64,10 @@ Pet::Pet(PetType type) :
     m_TrainingPoints(0), m_resetTalentsCost(0), m_resetTalentsTime(0),
     m_removed(false), m_happinessTimer(7500), m_loyaltyTimer(12000), m_petType(type), m_duration(0),
     m_loyaltyPoints(0), m_bonusdamage(0), m_auraUpdateMask(0), m_loading(false),
-    m_enabled(true), m_unSummoned(false)
+    m_enabled(true), m_unSummoned(false), m_focusTimer(4000)
 {
     m_name = "Pet";
-    m_regenTimer = 4000;
+    m_regenTimer = REGEN_TIME_FULL;
 
     // pets always have a charminfo, even if they are not actually charmed
     InitCharmInfo(this);
@@ -730,12 +730,8 @@ void Pet::Update(uint32 update_diff, uint32 diff)
 
 void Pet::RegenerateAll(uint32 update_diff, bool skipCombatCheck)
 {
-    //regenerate Focus
     if (m_regenTimer <= update_diff)
     {
-        if (getPetType() == HUNTER_PET)
-            RegenerateFocus();
-
         if (!isInCombat() || IsPolymorphed())
             RegenerateHealth();
 
@@ -748,6 +744,14 @@ void Pet::RegenerateAll(uint32 update_diff, bool skipCombatCheck)
 
     if (getPetType() != HUNTER_PET)
         return;
+
+    if (m_focusTimer <= update_diff)
+    {
+        RegenerateFocus();
+        m_focusTimer = 4000;
+    }
+    else
+        m_focusTimer -= update_diff;
 
     if (m_happinessTimer <= update_diff)
     {
@@ -775,7 +779,7 @@ void Pet::RegenerateFocus()
     if (curValue >= maxValue)
         return;
 
-    float addvalue = 24 * sWorld.getConfig(CONFIG_FLOAT_RATE_POWER_FOCUS);
+    float addvalue = 25 * sWorld.getConfig(CONFIG_FLOAT_RATE_POWER_FOCUS);
 
     AuraList const& ModPowerRegenPCTAuras = GetAurasByType(SPELL_AURA_MOD_POWER_REGEN_PERCENT);
     for (AuraList::const_iterator i = ModPowerRegenPCTAuras.begin(); i != ModPowerRegenPCTAuras.end(); ++i)
@@ -1241,8 +1245,12 @@ bool Pet::CreateBaseAtCreature(Creature* creature)
         SetByteValue(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_UNK3 | UNIT_BYTE2_FLAG_AURAS | UNIT_BYTE2_FLAG_UNK5);
         SetUInt32Value(UNIT_FIELD_FLAGS, UNIT_FLAG_PET_RENAME | UNIT_FLAG_PET_ABANDON);
 
-
-        SetUInt32Value(UNIT_MOD_CAST_SPEED, creature->GetUInt32Value(UNIT_MOD_CAST_SPEED));
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
+        SetFloatValue(UNIT_MOD_CAST_SPEED, creature->GetFloatValue(UNIT_MOD_CAST_SPEED));
+#else
+        SetInt32Value(UNIT_MOD_CAST_SPEED, creature->GetInt32Value(UNIT_MOD_CAST_SPEED));
+#endif
+        
         SetLoyaltyLevel(REBELLIOUS);
     }
     return true;
@@ -1288,7 +1296,7 @@ bool Pet::InitStatsForLevel(uint32 petlevel, Unit* owner)
     SetLevel(petlevel);
 
     // Before 1.9 pets retain their wild damage type
-    if (sWorld.GetWowPatch() < WOW_PATCH_109)
+    if (sWorld.GetWowPatch() < WOW_PATCH_109 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PETS))
         SetMeleeDamageSchool(SpellSchools(cinfo->dmgschool));
     else
         SetMeleeDamageSchool(SPELL_SCHOOL_NORMAL);
@@ -1299,9 +1307,11 @@ bool Pet::InitStatsForLevel(uint32 petlevel, Unit* owner)
     SetAttackTime(BASE_ATTACK, cinfo->baseattacktime); //BASE_ATTACK_TIME);
     SetAttackTime(OFF_ATTACK, cinfo->baseattacktime); //BASE_ATTACK_TIME);
     SetAttackTime(RANGED_ATTACK, cinfo->rangeattacktime); //BASE_ATTACK_TIME);
-
-    SetFloatValue(UNIT_MOD_CAST_SPEED, 1.0);
-
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
+    SetFloatValue(UNIT_MOD_CAST_SPEED, 1.0f);
+#else
+    SetInt32Value(UNIT_MOD_CAST_SPEED, 0);
+#endif
     CreatureFamilyEntry const* cFamily = sCreatureFamilyStore.LookupEntry(cinfo->family);
     if (cFamily && cFamily->minScale > 0.0f && getPetType() == HUNTER_PET)
     {
@@ -1320,8 +1330,10 @@ bool Pet::InitStatsForLevel(uint32 petlevel, Unit* owner)
 
     int32 createResistance[MAX_SPELL_SCHOOL] = {0, 0, 0, 0, 0, 0, 0};
 
-    // Before 1.9 pets retain their wild resistances
-    if (getPetType() != HUNTER_PET || sWorld.GetWowPatch() < WOW_PATCH_109)
+    // http://wowwiki.wikia.com/wiki/Patch_1.3.0
+    // Before 1.3 pets retain their wild resistances, however it is mentioned as a bug.
+    // TODO: Do we keep it or remove it?
+    if (getPetType() != HUNTER_PET || (sWorld.GetWowPatch() < WOW_PATCH_103 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PETS)))
     {
         createResistance[SPELL_SCHOOL_HOLY]   = cinfo->resistance1;
         createResistance[SPELL_SCHOOL_FIRE]   = cinfo->resistance2;

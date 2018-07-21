@@ -1011,7 +1011,7 @@ struct npc_training_dummyAI : ScriptedAI
             {
                 for (auto itr = attackers.begin(); itr != attackers.end();)
                 {
-                    if (!itr->first && !itr->first->IsInWorld())
+                    if (!itr->first || !itr->first->IsInWorld())
                     {
                         itr = attackers.erase(itr);
                         continue;
@@ -1021,6 +1021,7 @@ struct npc_training_dummyAI : ScriptedAI
                         m_creature->_removeAttacker(itr->first);
                         m_creature->getThreatManager().modifyThreatPercent(itr->first, -101.0f);
                         itr = attackers.erase(itr);
+                        continue;
                     }
                     ++itr;
                 }

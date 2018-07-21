@@ -83,12 +83,17 @@ uint8 const ConditionTargetsInternal[] =
     CONDITION_REQ_MAP_OR_WORLDOBJECT, //  34
     CONDITION_REQ_MAP_OR_WORLDOBJECT, //  35
     CONDITION_REQ_MAP_OR_WORLDOBJECT, //  36
-    CONDITION_REQ_SOURCE_AND_TARGET,  //  37
-    CONDITION_REQ_SOURCE_AND_TARGET,  //  38
+    CONDITION_REQ_BOTH_WORLDOBJECTS,  //  37
+    CONDITION_REQ_BOTH_WORLDOBJECTS,  //  38
     CONDITION_REQ_TARGET_WORLDOBJECT, //  39
     CONDITION_REQ_TARGET_UNIT,        //  40
     CONDITION_REQ_TARGET_UNIT,        //  41
     CONDITION_REQ_TARGET_UNIT,        //  42
+    CONDITION_REQ_TARGET_UNIT,        //  43
+    CONDITION_REQ_BOTH_UNITS,         //  44
+    CONDITION_REQ_TARGET_PLAYER,      //  45
+    CONDITION_REQ_TARGET_UNIT,        //  46
+    CONDITION_REQ_MAP_OR_WORLDOBJECT, //  47
 };
 
 // Starts from 4th element so that -3 will return first element.
@@ -307,47 +312,24 @@ bool inline ConditionEntry::Evaluate(WorldObject const* target, Map const* map, 
             }
             return false;
         }
-        case CONDITION_DEAD_OR_AWAY:
+        case CONDITION_ESCORT:
         {
-            Player const* pPlayer = (target && (target->GetTypeId() == TYPEID_PLAYER)) ? static_cast<Player const*>(target) : nullptr;
-            switch (m_value1)
-            {
-                case 0:                                     // Player dead or out of range
-                    return !pPlayer || !pPlayer->isAlive() || (m_value2 && source && !source->IsWithinDistInMap(pPlayer, m_value2));
-                case 1:                                     // All players in Group dead or out of range
-                    if (!pPlayer)
-                        return true;
-                    if (Group* grp = ((Player*)pPlayer)->GetGroup())
-                    {
-                        for (GroupReference* itr = grp->GetFirstMember(); itr != NULL; itr = itr->next())
-                        {
-                            Player* pl = itr->getSource();
-                            if (pl && pl->isAlive() && !pl->isGameMaster() && (!m_value2 || !source || source->IsWithinDistInMap(pl, m_value2)))
-                                return false;
-                        }
-                        return true;
-                    }
-                    else
-                        return !pPlayer->isAlive() || (m_value2 && source && !source->IsWithinDistInMap(pPlayer, m_value2));
-                case 2:                                     // All players in instance dead or out of range
-                    if (!map && (target || source))
-                        map = source ? source->GetMap() : target->GetMap();
-                    if (!map || !map->Instanceable())
-                    {
-                        sLog.outErrorDb("CONDITION_DEAD_OR_AWAY %u (Player in instance case) - called from %s without map param or from non-instanceable map %i", m_entry, conditionSourceToStr[conditionSourceType], map ? map->GetId() : -1);
-                        return false;
-                    }
-                    for (Map::PlayerList::const_iterator itr = map->GetPlayers().begin(); itr != map->GetPlayers().end(); ++itr)
-                    {
-                        Player const* plr = itr->getSource();
-                        if (plr && plr->isAlive() && !plr->isGameMaster() && (!m_value2 || !source || source->IsWithinDistInMap(plr, m_value2)))
-                            return false;
-                    }
+            const Creature* pSource = ToCreature(source);
+            const Player* pTarget = ToPlayer(target);
+
+            if (m_value1 & CF_ESCORT_SOURCE_DEAD)
+                if (pSource && pSource->isDead())
                     return true;
-                case 3:                                     // Creature source is dead
-                    return !source || source->GetTypeId() != TYPEID_UNIT || !((Unit*)source)->isAlive();
-            }
-            break;
+
+            if (m_value1 & CF_ESCORT_TARGET_DEAD)
+                if (pTarget && (pTarget->isDead() || !pTarget->IsInWorld()))
+                    return true;
+
+            if (m_value2)
+                if (pSource && pTarget && !pSource->IsWithinDistInMap(pTarget, m_value2))
+                    return true;
+
+            return false;
         }
         case CONDITION_ACTIVE_HOLIDAY:
         {
@@ -456,32 +438,47 @@ bool inline ConditionEntry::Evaluate(WorldObject const* target, Map const* map, 
 
             return false;
         }
-        case CONDITION_INSTANCE_DATA_EQUAL:
+        case CONDITION_INSTANCE_DATA:
         {
             const Map* pMap = map ? map : (source ? source->GetMap() : target->GetMap());
 
             if (InstanceData const* data = map->GetInstanceData())
-                return const_cast<InstanceData*>(data)->GetData(m_value1) == m_value2;
+            {
+                switch (m_value3)
+                {
+                    case 0:
+                        return const_cast<InstanceData*>(data)->GetData(m_value1) == m_value2;
+                    case 1:
+                        return const_cast<InstanceData*>(data)->GetData(m_value1) >= m_value2;
+                    case 2:
+                        return const_cast<InstanceData*>(data)->GetData(m_value1) <= m_value2;
+                }
+            }
 
             return false;
         }
-        case CONDITION_INSTANCE_DATA_GREATER:
+        case CONDITION_MAP_EVENT_DATA:
         {
             const Map* pMap = map ? map : (source ? source->GetMap() : target->GetMap());
 
-            if (InstanceData const* data = map->GetInstanceData())
-                return const_cast<InstanceData*>(data)->GetData(m_value1) >= m_value2;
-
+            if (const ScriptedEvent* pEvent = pMap->GetScriptedMapEvent(m_value1))
+            {
+                switch (m_value4)
+                {
+                    case 0:
+                        return pEvent->GetData(m_value2) == m_value3;
+                    case 1:
+                        return pEvent->GetData(m_value2) >= m_value3;
+                    case 2:
+                        return pEvent->GetData(m_value2) <= m_value3;
+                }
+            }
             return false;
         }
-        case CONDITION_INSTANCE_DATA_LESS:
+        case CONDITION_MAP_EVENT_ACTIVE:
         {
             const Map* pMap = map ? map : (source ? source->GetMap() : target->GetMap());
-
-            if (InstanceData const* data = map->GetInstanceData())
-                return const_cast<InstanceData*>(data)->GetData(m_value1) <= m_value2;
-
-            return false;
+            return pMap->GetScriptedMapEvent(m_value1);
         }
         case CONDITION_LINE_OF_SIGHT:
         {
@@ -539,6 +536,39 @@ bool inline ConditionEntry::Evaluate(WorldObject const* target, Map const* map, 
                     return mana_percent <= m_value1;
             }
             return false;
+        }
+        case CONDITION_IS_IN_COMBAT:
+        {
+            return target->ToUnit()->isInCombat();
+        }
+        case CONDITION_IS_HOSTILE_TO:
+        {
+            return target->ToUnit()->IsHostileTo(source->ToUnit());
+        }
+        case CONDITION_IS_IN_GROUP:
+        {
+            return target->ToPlayer()->GetGroup();
+        }
+        case CONDITION_IS_ALIVE:
+        {
+            return target->ToUnit()->isAlive();
+        }
+        case CONDITION_MAP_EVENT_TARGETS:
+        {
+            bool bSatisfied = true;
+            const Map* pMap = map ? map : (source ? source->GetMap() : target->GetMap());
+            if (const ScriptedEvent* pEvent = pMap->GetScriptedMapEvent(m_value1))
+            {
+                for (const auto& eventTarget : pEvent->m_vTargets)
+                {
+                    if (eventTarget.pObject)
+                        bSatisfied = bSatisfied && sConditionStorage.LookupEntry<ConditionEntry>(m_value2)->Meets(eventTarget.pObject, map, source, conditionSourceType);
+
+                    if (!bSatisfied)
+                        return false;
+                }
+            }
+            return bSatisfied;
         }
     }
     return false;
@@ -599,8 +629,20 @@ bool ConditionEntry::CheckParamRequirements(WorldObject const* target, Map const
             if (map || source || target)
                 return true;
             return false;
-        case CONDITION_REQ_SOURCE_AND_TARGET:
+        case CONDITION_REQ_BOTH_WORLDOBJECTS:
             if (source && target)
+                return true;
+            return false;
+        case CONDITION_REQ_BOTH_GAMEOBJECTS:
+            if (source && source->IsGameObject() && target && target->IsGameObject())
+                return true;
+            return false;
+        case CONDITION_REQ_BOTH_UNITS:
+            if (source && source->IsUnit() && target && target->IsUnit())
+                return true;
+            return false;
+        case CONDITION_REQ_BOTH_PLAYERS:
+            if (source && source->IsPlayer() && target && target->IsPlayer())
                 return true;
             return false;
     }
@@ -967,13 +1009,8 @@ bool ConditionEntry::IsValid()
             }
             break;
         }
-        case CONDITION_DEAD_OR_AWAY:
+        case CONDITION_ESCORT:
         {
-            if (m_value1 >= 4)
-            {
-                sLog.outErrorDb("Dead condition (entry %u, type %u) has an invalid value in value1. (Has %u, must be smaller than 4), skipping.", m_entry, m_condition, m_value1);
-                return false;
-            }
             break;
         }
         case CONDITION_WOW_PATCH:
@@ -1060,16 +1097,30 @@ bool ConditionEntry::IsValid()
             }
             break;
         }
+        case CONDITION_MAP_EVENT_TARGETS:
+        {
+            const ConditionEntry* condition1 = sConditionStorage.LookupEntry<ConditionEntry>(m_value2);
+            if (!condition1)
+            {
+                sLog.outErrorDb("CONDITION_MAP_EVENT_TARGETS (entry %u, type %d) has value2 %u without proper condition, skipped", m_entry, m_condition, m_value2);
+                return false;
+            }
+            break;
+        }
         case CONDITION_NONE:
         case CONDITION_INSTANCE_SCRIPT:
         case CONDITION_ACTIVE_HOLIDAY:
         case CONDITION_HAS_FLAG:
-        case CONDITION_INSTANCE_DATA_EQUAL:
-        case CONDITION_INSTANCE_DATA_GREATER:
-        case CONDITION_INSTANCE_DATA_LESS:
+        case CONDITION_INSTANCE_DATA:
+        case CONDITION_MAP_EVENT_DATA:
+        case CONDITION_MAP_EVENT_ACTIVE:
         case CONDITION_LINE_OF_SIGHT:
         case CONDITION_IS_MOVING:
         case CONDITION_HAS_PET:
+        case CONDITION_IS_IN_COMBAT:
+        case CONDITION_IS_HOSTILE_TO:
+        case CONDITION_IS_IN_GROUP:
+        case CONDITION_IS_ALIVE:
             break;
         default:
             sLog.outErrorDb("Condition entry %u has bad type of %d, skipped ", m_entry, m_condition);
@@ -1079,7 +1130,7 @@ bool ConditionEntry::IsValid()
 }
 
 // Check if a condition can be used without providing a player param
-bool ConditionEntry::CanBeUsedWithoutPlayer(uint16 entry)
+bool ConditionEntry::CanBeUsedWithoutPlayer(uint32 entry)
 {
     ConditionEntry const* condition = sConditionStorage.LookupEntry<ConditionEntry>(entry);
     if (!condition)

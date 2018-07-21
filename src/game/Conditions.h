@@ -25,7 +25,7 @@
 
 enum ConditionType
 {
-    //                                                      // value1       value2  for the Condition enumed
+    //                                                      // value1       value2        value3        value4
     CONDITION_NOT                   = -3,                   // cond-id-1    0          returns !cond-id-1
     CONDITION_OR                    = -2,                   // cond-id-1    cond-id-2  returns cond-id-1 OR cond-id-2
     CONDITION_AND                   = -1,                   // cond-id-1    cond-id-2  returns cond-id-1 AND cond-id-2
@@ -55,7 +55,7 @@ enum ConditionType
     CONDITION_ITEM_WITH_BANK        = 23,                   // item_id      count   check present req. amount items in inventory or bank
     CONDITION_WOW_PATCH             = 24,                   // value1: wow patch setting from config (0-10)
                                                             // value2: 0, 1 or 2 (0: equal to, 1: equal or higher than, 2: equal or less than)
-    CONDITION_DEAD_OR_AWAY          = 25,                   // value1: 0=player dead, 1=player is dead (with group dead), 2=player in instance are dead, 3=creature is dead
+    CONDITION_ESCORT                = 25,                   // value1: eEscortConditionFlags value2: distance
                                                             // value2: if != 0 only consider players in range of this value
     CONDITION_ACTIVE_HOLIDAY        = 26,                   // holiday_id   0       preferred use instead CONDITION_ACTIVE_GAME_EVENT when possible
     CONDITION_TARGET_GENDER         = 27,                   // 0=male, 1=female, 2=none (see enum Gender)
@@ -70,15 +70,20 @@ enum ConditionType
     CONDITION_HAS_FLAG              = 31,                   // field_id     flag
     CONDITION_LAST_WAYPOINT         = 32,                   // waypointId   0 = exact, 1: wp <= waypointId, 2: wp > waypointId  Use to check what waypoint was last reached
     CONDITION_MAP_ID                = 33,                   // map_id
-    CONDITION_INSTANCE_DATA_EQUAL   = 34,                   // index        data
-    CONDITION_INSTANCE_DATA_GREATER = 35,                   // index        data
-    CONDITION_INSTANCE_DATA_LESS    = 36,                   // index        data
+    CONDITION_INSTANCE_DATA         = 34,                   // index        data        0, 1 or 2 (0: equal to, 1: equal or higher than, 2: equal or less than)
+    CONDITION_MAP_EVENT_DATA        = 35,                   // event_id     index       data       0, 1 or 2 (0: equal to, 1: equal or higher than, 2: equal or less than)
+    CONDITION_MAP_EVENT_ACTIVE      = 36,                   // event_id     0
     CONDITION_LINE_OF_SIGHT         = 37,                   // 0            0
     CONDITION_DISTANCE              = 38,                   // distance     0, 1 or 2 (0: equal to, 1: equal or higher than, 2: equal or less than)
     CONDITION_IS_MOVING             = 39,                   // 0            0
     CONDITION_HAS_PET               = 40,                   // 0            0
     CONDITION_HEALTH_PERCENT        = 41,                   // hp_percent   0, 1 or 2 (0: equal to, 1: equal or higher than, 2: equal or less than)
     CONDITION_MANA_PERCENT          = 42,                   // mana_percent 0, 1 or 2 (0: equal to, 1: equal or higher than, 2: equal or less than)
+    CONDITION_IS_IN_COMBAT          = 43,                   // 0            0
+    CONDITION_IS_HOSTILE_TO         = 44,                   // 0            0
+    CONDITION_IS_IN_GROUP           = 45,                   // 0            0
+    CONDITION_IS_ALIVE              = 46,                   // 0            0
+    CONDITION_MAP_EVENT_TARGETS     = 47,                   // event_id     cond_id
 
 };
 
@@ -98,7 +103,7 @@ enum ConditionSource                                        // From where was th
     CONDITION_FROM_HARDCODED        = 5,                    // Used to check a hardcoded event - not actually a condition
     CONDITION_FROM_VENDOR           = 6,                    // Used to check a condition from a vendor
     CONDITION_FROM_SPELL_AREA       = 7,                    // Used to check a condition from spell_area table
-    CONDITION_FROM_RESERVED_1       = 8,                    // reserved for 3.x and later
+    CONDITION_FROM_MAP_EVENT        = 8,                    // Used to check conditions from scripted map events
     CONDITION_FROM_DBSCRIPTS        = 9,                    // Used to check a condition from DB Scripts Engine
 };
 
@@ -117,21 +122,30 @@ enum ConditionRequirement
     CONDITION_REQ_SOURCE_PLAYER,
     CONDITION_REQ_ANY_WORLDOBJECT,
     CONDITION_REQ_MAP_OR_WORLDOBJECT,
-    CONDITION_REQ_SOURCE_AND_TARGET,
+    CONDITION_REQ_BOTH_WORLDOBJECTS,
+    CONDITION_REQ_BOTH_GAMEOBJECTS,
+    CONDITION_REQ_BOTH_UNITS,
+    CONDITION_REQ_BOTH_PLAYERS,
+};
+
+enum eEscortConditionFlags
+{
+    CF_ESCORT_SOURCE_DEAD = 0x1,
+    CF_ESCORT_TARGET_DEAD = 0x2,
 };
 
 class ConditionEntry
 {
     public:
         // Default constructor, required for SQL Storage (Will give errors if used elsewise)
-        ConditionEntry() : m_entry(0), m_condition(CONDITION_AND), m_value1(0), m_value2(0), m_flags(0) {}
+        ConditionEntry() : m_entry(0), m_condition(CONDITION_AND), m_value1(0), m_value2(0), m_value3(0), m_value4(0), m_flags(0) {}
 
-        ConditionEntry(uint16 _entry, int16 _condition, uint32 _value1, uint32 _value2, uint8 _flags)
-            : m_entry(_entry), m_condition(ConditionType(_condition)), m_value1(_value1), m_value2(_value2), m_flags(_flags) {}
+        ConditionEntry(uint32 _entry, int16 _condition, uint32 _value1, uint32 _value2, uint32 _value3, uint32 _value4, uint8 _flags)
+            : m_entry(_entry), m_condition(ConditionType(_condition)), m_value1(_value1), m_value2(_value2), m_value3(_value3), m_value4(_value4), m_flags(_flags) {}
 
         // Checks correctness of values
         bool IsValid();
-        static bool CanBeUsedWithoutPlayer(uint16 entry);
+        static bool CanBeUsedWithoutPlayer(uint32 entry);
 
         // Checks if the condition is met
         bool Meets(WorldObject const* target, Map const* map, WorldObject const* source, ConditionSource conditionSourceType) const;
@@ -143,10 +157,12 @@ class ConditionEntry
     private:
         bool CheckParamRequirements(WorldObject const* target, Map const* map, WorldObject const* source) const;
         bool inline Evaluate(WorldObject const* target, Map const* map, WorldObject const* source, ConditionSource conditionSourceType) const;
-        uint16 m_entry;                                     // entry of the condition
+        uint32 m_entry;                                     // entry of the condition
         ConditionType m_condition;                          // additional condition type
         uint32 m_value1;                                    // data for the condition - see ConditionType definition
         uint32 m_value2;
+        uint32 m_value3;
+        uint32 m_value4;
         uint8 m_flags;
 };
 
