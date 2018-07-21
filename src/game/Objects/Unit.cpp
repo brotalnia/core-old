@@ -9855,7 +9855,6 @@ void Unit::ModConfuseSpell(bool apply, ObjectGuid casterGuid, uint32 spellID, Mo
 
 void Unit::SetFeignDeath(bool apply, ObjectGuid casterGuid, uint32 /*spellID*/)
 {
-    // [TODO] SMSG_FEIGN_DEATH_RESISTED sert a quoi ? - il affiche 'Resiste' en notify.
     if (apply)
     {
         m_movementInfo.RemoveMovementFlag(MOVEFLAG_MASK_MOVING_OR_TURN);
