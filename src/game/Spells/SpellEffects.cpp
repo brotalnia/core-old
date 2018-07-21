@@ -4337,6 +4337,15 @@ void Spell::EffectInterruptCast(SpellEffectIndex eff_idx)
                 unitTarget->ProhibitSpellSchool(GetSpellSchoolMask(curSpellInfo), GetSpellDuration(m_spellInfo));
                 unitTarget->InterruptSpell(CurrentSpellTypes(i), false);
 
+                if (Creature* pCreature = unitTarget->ToCreature())
+                {
+                    if (pCreature->AI() && !pCreature->AI()->IsCombatMovement() && !pCreature->AI()->IsMeleeAttackEnabled())
+                    {
+                        pCreature->AI()->SetMeleeAttack(true);
+                        pCreature->AI()->SetCombatMovement(true);
+                    }
+                }
+
                 ExecuteLogInfo info(unitTarget->GetObjectGuid());
                 info.interruptCast.spellId = curSpellInfo->Id;
                 AddExecuteLogInfo(eff_idx, info);
