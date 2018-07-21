@@ -921,7 +921,15 @@ void World::LoadNostalriusConfig(bool reload)
     setConfig(CONFIG_UINT32_MAPUPDATE_MIN_VISIBILITY_DISTANCE,                  "MapUpdate.MinVisibilityDistance", 0);
 
     setConfigMinMax(CONFIG_UINT32_SPELLS_CCDELAY, "Spells.CCDelay", 200, 0, 20000);
-    setConfigMinMax(CONFIG_UINT32_DEBUFF_LIMIT, "DebuffLimit", 16, 1, 40);
+    setConfigMinMax(CONFIG_UINT32_DEBUFF_LIMIT, "DebuffLimit", 0, 0, 40);
+    // If max debuff slots is at 0, decide based on patch.
+    if (getConfig(CONFIG_UINT32_DEBUFF_LIMIT) == 0)
+    {
+        if (GetWowPatch() >= WOW_PATCH_107)
+            setConfig(CONFIG_UINT32_DEBUFF_LIMIT, 16);
+        else
+            setConfig(CONFIG_UINT32_DEBUFF_LIMIT, 8);
+    }
     setConfigMinMax(CONFIG_UINT32_MAX_POINTS_PER_MVT_PACKET, "Movement.MaxPointsPerPacket", 80, 5, 10000);
     setConfigMinMax(CONFIG_UINT32_RELOCATION_VMAP_CHECK_TIMER, "Movement.RelocationVmapsCheckDelay", 0, 0, 2000);
 
