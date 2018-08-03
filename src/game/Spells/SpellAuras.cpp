@@ -3293,7 +3293,7 @@ void Aura::HandleFeignDeath(bool apply, bool Real)
         {
             if (Unit* refTarget = pReference->getSourceUnit())
             {
-                if (!refTarget->IsPlayer() && pTarget->MagicSpellHitResult(refTarget, GetHolder()->GetSpellProto(), nullptr) != SPELL_MISS_NONE)
+                if (!refTarget->IsPlayer() && pTarget->IsWithinDistInMap(refTarget, 20.0f, false) && pTarget->MagicSpellHitResult(refTarget, GetHolder()->GetSpellProto(), nullptr) != SPELL_MISS_NONE)
                 {
                     success = false;
                     break;
