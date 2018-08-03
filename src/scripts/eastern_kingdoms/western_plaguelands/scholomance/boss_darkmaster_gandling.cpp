@@ -77,7 +77,7 @@ struct boss_darkmaster_gandlingAI : public ScriptedAI
         ArcaneMissiles_Timer = 4500;
         ShadowShield_Timer = 12000;
         Curse_Timer = 2000;
-        Teleport_Timer = 16000;
+        Teleport_Timer = 26000;
         bShadowPortalCasted = false;
         ShadowPortalTargetGUID = 0;
     }
@@ -300,7 +300,7 @@ struct boss_darkmaster_gandlingAI : public ScriptedAI
                                 break;
                         }
                     }
-                    Teleport_Timer = urand(20000, 35000);
+                    Teleport_Timer = urand(30000, 35000);
                 }
             }
             else Teleport_Timer -= diff;

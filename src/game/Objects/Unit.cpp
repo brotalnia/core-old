@@ -4759,6 +4759,17 @@ void Unit::RemoveNotOwnSingleTargetAuras()
 
 }
 
+void Unit::DeleteAuraHolder(SpellAuraHolder *holder)
+{
+    if (holder->IsInUse())
+    {
+        holder->SetDeleted();
+        m_deletedHolders.push_back(holder);
+    }
+    else
+        delete holder;
+}
+
 void Unit::RemoveSpellAuraHolder(SpellAuraHolder *holder, AuraRemoveMode mode)
 {
     // Statue unsummoned at holder remove
@@ -4808,13 +4819,7 @@ void Unit::RemoveSpellAuraHolder(SpellAuraHolder *holder, AuraRemoveMode mode)
 
     // If holder in use (removed from code that plan access to it data after return)
     // store it in holder list with delayed deletion
-    if (holder->IsInUse())
-    {
-        holder->SetDeleted();
-        m_deletedHolders.push_back(holder);
-    }
-    else
-        delete holder;
+    DeleteAuraHolder(holder);
 
     if (isChanneled && caster)
     {
@@ -6132,7 +6137,7 @@ void Unit::RemoveCharmAuras()
 
 float Unit::GetCombatDistance(const Unit* target) const
 {
-    float radius = target->GetFloatValue(UNIT_FIELD_COMBATREACH) + GetFloatValue(UNIT_FIELD_COMBATREACH);
+    float radius = target->GetObjectBoundingRadius() + GetFloatValue(UNIT_FIELD_COMBATREACH);
     float dx = GetPositionX() - target->GetPositionX();
     float dy = GetPositionY() - target->GetPositionY();
     float dz = GetPositionZ() - target->GetPositionZ();
@@ -7553,11 +7558,15 @@ bool Unit::isTargetableForAttack(bool inverseAlive /*=false*/, bool isAttackerPl
     if (isAttackerPlayer && HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER))
         return false;
 
+    // Players or their pets can attack feigned players
+    if (!isAttackerPlayer && hasUnitState(UNIT_STAT_DIED))
+        return false;
+
     // inversealive is needed for some spells which need to be casted at dead targets (aoe)
     if (isAlive() == inverseAlive)
         return false;
 
-    return IsInWorld() && !hasUnitState(UNIT_STAT_DIED) && !IsTaxiFlying();
+    return IsInWorld() && !IsTaxiFlying();
 }
 
 // function based on function Unit::CanAttack from 13850 client
@@ -9853,7 +9862,6 @@ void Unit::ModConfuseSpell(bool apply, ObjectGuid casterGuid, uint32 spellID, Mo
 
 void Unit::SetFeignDeath(bool apply, ObjectGuid casterGuid, uint32 /*spellID*/)
 {
-    // [TODO] SMSG_FEIGN_DEATH_RESISTED sert a quoi ? - il affiche 'Resiste' en notify.
     if (apply)
     {
         m_movementInfo.RemoveMovementFlag(MOVEFLAG_MASK_MOVING_OR_TURN);

@@ -448,6 +448,30 @@ struct npc_grimstoneAI : public npc_escortAI
                         DoGate(DATA_ARENA2, GO_STATE_READY);
                         DoGate(DATA_ARENA3, GO_STATE_ACTIVE);
                         DoGate(DATA_ARENA4, GO_STATE_ACTIVE);
+
+                        std::list<Unit*> targets;
+                        MaNGOS::AnyUnitInObjectRangeCheck u_check(m_creature, 80.0f);
+                        MaNGOS::UnitListSearcher<MaNGOS::AnyUnitInObjectRangeCheck> searcher(targets, u_check);
+                        Cell::VisitAllObjects(m_creature, searcher, 80.0f);
+                        for (std::list<Unit*>::iterator iter = targets.begin(); iter != targets.end(); ++iter)
+                        {
+                            Unit* target = *iter;
+                            if (Creature* pCreature = ToCreature(target))
+                            {
+                                switch (pCreature->GetEntry())
+                                {
+                                case 8895:
+                                case 8896:
+                                case 8904:
+                                case 8902:
+                                case 8893:
+                                case 8894:
+                                    pCreature->SetFactionTemporary(674, TEMPFACTION_RESTORE_RESPAWN);
+                                    break;
+                                }
+                            }
+                        }
+
                         CanWalk = true;
                         Event_Timer = 0;
                         break;

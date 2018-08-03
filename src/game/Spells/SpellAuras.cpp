@@ -2738,6 +2738,11 @@ void Aura::HandleChannelDeathItem(bool apply, bool Real)
 
         Item* newitem = ((Player*)caster)->StoreNewItem(dest, spellInfo->EffectItemType[m_effIndex], true);
         ((Player*)caster)->SendNewItem(newitem, count, true, true);
+
+        if (caster->HasSpell(18372) && !caster->HasAura(18371))
+        {
+            caster->CastSpell(caster, 18371, true);
+        }
     }
 }
 
@@ -2820,6 +2825,54 @@ void Aura::HandleModPossess(bool apply, bool Real)
     Unit* caster = GetCaster();
     if (!caster || !target)
         return;
+
+    // Prevent crash when target is controlling summoned unit (Eye of Kilrog)
+    if (apply && target->GetCharmGuid())
+    {
+        Unit::SpellAuraHolderMap& uAuras = target->GetSpellAuraHolderMap();
+        for (Unit::SpellAuraHolderMap::const_iterator itr = uAuras.begin(); itr != uAuras.end(); ++itr)
+        {
+            SpellAuraHolder *holder = itr->second;
+            const SpellEntry* pSpellEntry = holder->GetSpellProto();
+            if (IsSpellHaveEffect(pSpellEntry, SPELL_EFFECT_SUMMON_POSSESSED))
+            {
+                holder->SetRemoveMode(AURA_REMOVE_BY_DELETE);
+                holder->UnregisterSingleCastHolder();
+                for (int32 i = 0; i < MAX_EFFECT_INDEX; ++i)
+                {
+                    if (Aura *aura = holder->m_auras[i])
+                        target->RemoveAura(aura, AURA_REMOVE_BY_DELETE);
+                }
+                holder->_RemoveSpellAuraHolder();
+                target->DeleteAuraHolder(holder);
+                uAuras.erase(itr);
+
+                if (Player* player = target->ToPlayer())
+                {
+                    Unit* possessed = player->GetCharm();
+
+                    player->SetCharm(nullptr);
+                    if (possessed)
+                        player->SetClientControl(possessed, 0);
+                    player->SetMover(nullptr);
+                    player->GetCamera().ResetView();
+                    player->RemovePetActionBar();
+
+                    if (possessed)
+                    {
+                        possessed->clearUnitState(UNIT_STAT_CONTROLLED);
+                        possessed->RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);
+                        possessed->SetCharmerGuid(ObjectGuid());
+
+                        if (possessed->GetUInt32Value(UNIT_CREATED_BY_SPELL) == pSpellEntry->Id && possessed->GetTypeId() == TYPEID_UNIT)
+                            ((Creature*)possessed)->DespawnOrUnsummon();
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     caster->ModPossess(target, apply, m_removeMode);
     target->AddThreat(caster,target->GetHealth(), false, GetSpellSchoolMask(GetSpellProto()));
 
@@ -3057,6 +3110,8 @@ void Aura::HandleModCharm(bool apply, bool Real)
         target->CastStop(target == caster ? GetId() : 0);
         caster->SetCharm(target);
 
+        // Clear threat list to prevent previously hostile enemies attacking,
+        // and allow combat to drop
         target->CombatStop(true);
         target->DeleteThreatList();
         target->getHostileRefManager().deleteReferences();
@@ -3108,28 +3163,22 @@ void Aura::HandleModCharm(bool apply, bool Real)
         }
         else if (Player* pPlayer = target->ToPlayer())
         {
-            if (caster->GetTypeId() == TYPEID_UNIT)
-            {
-                pPlayer->SetControlledBy(caster);
-                if (pPlayer->i_AI && m_spellAuraHolder->GetId() == 28410)
-                    pPlayer->i_AI->enablePositiveSpells = true;
-            }
-            else
-            {
-                PlayerAI *oldAi = pPlayer->i_AI;
-                delete oldAi;
-                pPlayer->i_AI = new PlayerControlledAI(pPlayer, caster);
-            }
+            pPlayer->SetControlledBy(caster);
+            if (pPlayer->i_AI && m_spellAuraHolder->GetId() == 28410)
+                pPlayer->i_AI->enablePositiveSpells = true;
         }
+
         target->UpdateControl();
         if (caster->GetTypeId() == TYPEID_PLAYER)
             ((Player*)caster)->CharmSpellInitialize();
     }
     else
     {
+        Creature *pCasterCreature = caster ? caster->ToCreature() : nullptr;
+
         target->SetCharmerGuid(ObjectGuid());
 
-        if(target->GetTypeId() != TYPEID_PLAYER)
+        if (target->GetTypeId() != TYPEID_PLAYER)
         {
             CreatureInfo const *cinfo = ((Creature*)target)->GetCreatureInfo();
 
@@ -3166,46 +3215,37 @@ void Aura::HandleModCharm(bool apply, bool Real)
         
         target->UpdateControl();
 
-        if (target->GetTypeId() == TYPEID_PLAYER)
+        if (Player* pPlayer = target->ToPlayer())
         {
-            Player* pPlayer = target->ToPlayer();
-            ((Player*)target)->setFactionForRace(target->getRace());
+            pPlayer->setFactionForRace(target->getRace());
+            pPlayer->SendAttackSwingCancelAttack();
+
+            pPlayer->RemoveAI();
+
+            // Charmed players are seen as hostile and not in the group for other clients, restore
+            // group upon charm end
+            if (pPlayer->GetGroup())
+                pPlayer->GetGroup()->BroadcastGroupUpdate();
         }
-        // this should possibly be the case for other spells too...
-        // why on earth remove player from combat if, for example, its a boss casting it
-        if (m_spellAuraHolder->GetId() == 28410 && target->GetTypeId() == TYPEID_PLAYER)
+
+        if (target->IsNonMeleeSpellCasted(false))
+            target->InterruptNonMeleeSpells(false);
+
+        // Clear threat list for targets engaged while charmed
+        target->DeleteThreatList();
+        target->getHostileRefManager().deleteReferences();
+        target->AttackStop();
+
+        // Re-add the target to the caster's hated list to prevent combat dropping.
+        // Combat reset timer kicks in once the hated list is empty. If the caster is
+        // a creature and combat ended, remove the target (likely player) from combat too.
+        if (pCasterCreature && pCasterCreature->isAlive() && pCasterCreature->isInCombat())
         {
-            if (caster->isAlive() && caster->isInCombat())
-            {
-                if (target->GetTypeId() == TYPEID_PLAYER)
-                    ((Player*)target)->SendAttackSwingCancelAttack();
-
-                if (target->IsNonMeleeSpellCasted(false))
-                    target->InterruptNonMeleeSpells(false);
-
-                target->AttackStop();
-                target->RemoveAllAttackers();
-                target->DeleteThreatList();
-                target->getHostileRefManager().deleteReferences();
-
-                caster->SetInCombatWith(target);
-                target->SetInCombatWith(caster);
-                
-                target->SetInCombatState(false, caster);
-            }
-            else
-            {
-                target->CombatStop(true);
-                target->DeleteThreatList();
-                target->getHostileRefManager().deleteReferences();
-            }
+            pCasterCreature->SetInCombatWith(target);
+            pCasterCreature->AddThreat(target);
         }
         else
-        {
-            target->CombatStop(true);
-            target->DeleteThreatList();
-            target->getHostileRefManager().deleteReferences();
-        }
+            target->CombatStop(false);
 
         target->SetUnitMovementFlags(MOVEFLAG_NONE);
         target->StopMoving();
@@ -3218,16 +3258,6 @@ void Aura::HandleModCharm(bool apply, bool Real)
                 pTargetCrea->AIM_Initialize();
             if (caster)
                 pTargetCrea->AttackedBy(caster);
-        }
-        else if (Player* pPlayer = target->ToPlayer())
-        {
-            pPlayer->RemoveAI();
-
-            // Charmed players are seen as hostile and not in the group for other clients, restore
-            // group upon charm end
-            pPlayer->setFactionForRace(target->getRace());
-            if(pPlayer->GetGroup())
-                pPlayer->GetGroup()->BroadcastGroupUpdate();
         }
     }
 }
@@ -3253,12 +3283,50 @@ void Aura::HandleFeignDeath(bool apply, bool Real)
     if (!Real)
         return;
 
+    bool success = true;
     Unit* pTarget = GetTarget();
-    // Toutes les personnes qui castent sur le casteur de FD doivent etre interrompues.
+    
     if (apply)
-        pTarget->InterruptSpellsCastedOnMe();
+    {
+        HostileReference* pReference = pTarget->getHostileRefManager().getFirst();
+        while (pReference)
+        {
+            if (Unit* refTarget = pReference->getSourceUnit())
+            {
+                if (!refTarget->IsPlayer() && pTarget->MagicSpellHitResult(refTarget, GetHolder()->GetSpellProto(), nullptr) != SPELL_MISS_NONE)
+                {
+                    success = false;
+                    break;
+                }
+            }
+            pReference = pReference->next();
+        }
 
-    pTarget->SetFeignDeath(apply, GetCasterGuid(), GetId());
+        if (success)
+        {
+            // Interrupt everyone casting on feign caster
+            pTarget->InterruptSpellsCastedOnMe();
+        }
+        else
+        {
+            // Send error to client and remove aura if spell resisted
+            if (Player* plr = pTarget->ToPlayer())
+            {
+                plr->SendFeignDeathResisted();
+                plr->SendAttackSwingCancelAttack();
+            }
+
+            // prevent interrupt message
+            if (GetCasterGuid() == pTarget->GetObjectGuid())
+                pTarget->FinishSpell(CURRENT_GENERIC_SPELL, false);
+            pTarget->InterruptNonMeleeSpells(true);
+
+            GetHolder()->SetAuraDuration(0);
+        }
+    }
+
+    if (success)
+        pTarget->SetFeignDeath(apply, GetCasterGuid(), GetId());
 }
 
 void Aura::HandleAuraModDisarm(bool apply, bool Real)
@@ -5928,7 +5996,7 @@ SpellAuraHolder::SpellAuraHolder(SpellEntry const* spellproto, Unit *target, Wor
     m_applyTime      = time(nullptr);
     m_isPassive      = IsPassiveSpell(GetId()) || spellproto->Attributes == 0x80;
     m_isDeathPersist = IsDeathPersistentSpell(spellproto);
-    m_isSingleTarget = IsSingleTargetSpell(spellproto);
+    m_isSingleTarget = HasSingleTargetAura(spellproto);
     m_procCharges    = spellproto->procCharges;
     m_isChanneled    = IsChanneledSpell(spellproto);
 

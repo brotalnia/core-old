@@ -192,7 +192,6 @@ class MANGOS_DLL_SPEC CreatureAI
         // Does the creature melee attack.
         bool IsMeleeAttackEnabled() const { return m_bMeleeAttack; }
 
-        // Triggers an alert when a Unit moves near stealth detection range.
         virtual void TriggerAlert(Unit const* who);
 
         // TrinityCore
