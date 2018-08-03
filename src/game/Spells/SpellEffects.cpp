@@ -4348,7 +4348,7 @@ void Spell::EffectInterruptCast(SpellEffectIndex eff_idx)
 
                 if (Creature* pCreature = unitTarget->ToCreature())
                 {
-                    if (pCreature->AI() && !pCreature->AI()->IsCombatMovement() && !pCreature->AI()->IsMeleeAttackEnabled())
+                    if (pCreature->AI() && !pCreature->AI()->IsCombatMovementEnabled() && !pCreature->AI()->IsMeleeAttackEnabled())
                     {
                         pCreature->AI()->SetMeleeAttack(true);
                         pCreature->AI()->SetCombatMovement(true);
