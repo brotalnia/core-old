@@ -115,7 +115,9 @@ void SpellModMgr::LoadSpellMods()
             ModUInt32ValueIfExplicit(fields[1], spell->procChance);
             ModUInt32ValueIfExplicit(fields[2], spell->procFlags);
             ModUInt32ValueIfExplicit(fields[4], spell->DurationIndex);
-            spell->Custom              = fields[3].GetUInt32();
+            const uint32 customFlags = fields[3].GetUInt32();
+            if (customFlags)
+                spell->Custom = customFlags;
 
             // 5         6               7          8          9           10
             // Category,CastingTimeIndex,StackAmount,SpellIconID,activeIconID,manaCost
