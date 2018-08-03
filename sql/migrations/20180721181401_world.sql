@@ -24,6 +24,10 @@ UPDATE `quest_template` SET `StartScript`=3382 WHERE `entry`=3382;
 -- Fix startup error.
 UPDATE `creature_template` SET `flags_extra`=0 WHERE `entry`=15341;
 
+-- Prevent mobs in Dustwind Cave from aggroing.
+UPDATE `creature_template` SET `flags_extra`=`flags_extra`+2 WHERE `entry` IN (3195, 3196, 3199)
+
+
 
 -- End of migration.
 END IF;
