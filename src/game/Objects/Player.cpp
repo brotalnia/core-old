@@ -16713,8 +16713,17 @@ void Player::SendExplorationExperience(uint32 Area, uint32 Experience)
     GetSession()->SendPacket(&data);
 }
 
-void Player::SendResetFailedNotify(uint32 mapid)
+void Player::SendFactionAtWar(uint32 reputationId, bool apply)
 {
+    WorldPacket data(SMSG_SET_FACTION_ATWAR, 4 + 1);
+    data << uint32(reputationId);
+    data << uint8(apply ? FACTION_FLAG_AT_WAR : 0);
+    GetSession()->SendPacket(&data);
+}
+
+void Player::SendResetFailedNotify()
+{
+    ChatHandler(this).SendSysMessage(LANG_LEAVE_TO_RESET_INSTANCE);
 }
 
 /// Reset all solo instances and optionally send a message on success for each
@@ -17836,10 +17845,10 @@ bool Player::BuyItemFromVendor(ObjectGuid vendorGuid, uint32 item, uint8 count, 
         return false;
     }
 
-    auto playerRank = sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_PURCHASE_REQUIREMENTS) ?
-        m_honorMgr.GetRank().rank: m_honorMgr.GetHighestRank().rank;
+    auto playerRank = (sWorld.GetWowPatch() < WOW_PATCH_107) && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_PURCHASE_REQUIREMENTS) ?
+        m_honorMgr.GetHighestRank().rank : m_honorMgr.GetRank().rank;
 
-    // not check level requiremnt for normal items (PvP related bonus items is another case)
+    // do not check level requirement for normal items (PvP related bonus items is another case)
     if (pProto->RequiredHonorRank && (playerRank < (uint8)pProto->RequiredHonorRank || getLevel() < pProto->RequiredLevel))
     {
         SendBuyError(BUY_ERR_RANK_REQUIRE, pCreature, item, 0);
