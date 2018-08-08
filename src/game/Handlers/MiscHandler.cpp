@@ -827,9 +827,9 @@ void WorldSession::HandleAreaTriggerOpcode(WorldPacket & recv_data)
             return;
     }
 
-    auto playerRank = sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_ZONE_REQUIREMENTS) ?
-        GetPlayer()->GetHonorMgr().GetRank().visualRank
-        : GetPlayer()->GetHonorMgr().GetHighestRank().visualRank;
+    // Assuming this was changed at the same time as the purchase requirement.
+    auto playerRank = (sWorld.GetWowPatch() < WOW_PATCH_107) && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_ZONE_REQUIREMENTS) ?
+        GetPlayer()->GetHonorMgr().GetHighestRank().visualRank : GetPlayer()->GetHonorMgr().GetRank().visualRank;
 
     if (!pl->isGameMaster())
     {
@@ -1086,8 +1086,9 @@ void WorldSession::HandleInspectHonorStatsOpcode(WorldPacket& recv_data) {
         data << pl->GetUInt32Value(PLAYER_FIELD_LAST_WEEK_RANK);
 
         // Rank progress bar
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
         data << (uint8)pl->GetByteValue(PLAYER_FIELD_BYTES2, 0);
-
+#endif
         SendPacket(&data);
     } else
         DEBUG_LOG("%s not found!", guid.GetString().c_str());

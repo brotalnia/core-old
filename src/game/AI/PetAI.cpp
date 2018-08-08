@@ -58,7 +58,8 @@ bool PetAI::_needToStop() const
     if (m_creature->IsPet() && !((Pet*)m_creature)->IsEnabled())
         return true;
 
-    return !m_creature->getVictim()->isTargetableForAttack();
+    bool playerPet = m_creature->GetCharmerOrOwnerOrSelf()->IsPlayer();
+    return !m_creature->getVictim()->isTargetableForAttack(false, playerPet);
 }
 
 void PetAI::_stopAttack()
@@ -248,7 +249,7 @@ void PetAI::UpdateAI(const uint32 diff)
 
                 if (target)
                 {
-                    if (CanAttack(target) && spell->CanAutoCast(target, false))
+                    if (CanAttack(target) && spell->CanAutoCast(target))
                     {
                         targetSpellStore.push_back(std::make_pair(target, spell));
                         spellUsed = true;
@@ -266,7 +267,7 @@ void PetAI::UpdateAI(const uint32 diff)
                         if (!ally)
                             continue;
 
-                        if (spell->CanAutoCast(ally, true))
+                        if (spell->CanAutoCast(ally))
                         {
                             targetSpellStore.push_back(std::make_pair(ally, spell));
                             spellUsed = true;
@@ -282,7 +283,7 @@ void PetAI::UpdateAI(const uint32 diff)
             else if (m_creature->getVictim() && CanAttack(m_creature->getVictim()) && !IsNonCombatSpell(spellInfo))
             {
                 Spell *spell = new Spell(m_creature, spellInfo, false);
-                if (spell->CanAutoCast(m_creature->getVictim(), false))
+                if (spell->CanAutoCast(m_creature->getVictim()))
                     targetSpellStore.push_back(std::make_pair(m_creature->getVictim(), spell));
                 else
                     spell->Delete();
@@ -626,7 +627,7 @@ void PetAI::MovementInform(uint32 moveType, uint32 data)
 
 bool PetAI::CanAttack(Unit* target)
 {
-    // Evaluates wether a pet can attack a specific target based on CommandState, ReactState and other flags
+    // Evaluates whether a pet can attack a specific target based on CommandState, ReactState and other flags
     // IMPORTANT: The order in which things are checked is important, be careful if you add or remove checks
 
     // Hmmm...

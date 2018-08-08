@@ -201,12 +201,14 @@ bool CreatureLinkingMgr::IsLinkingEntryValid(uint32 slaveEntry, CreatureLinkingI
 
         if (!slaveData)
         {
-            sLog.outErrorDb("`creature_linking` has a non existing slave (guid: %u, master_guid %u), skipped", slaveEntry, pTmp->masterId);
+            if (!sObjectMgr.IsExistingCreatureGuid(slaveEntry))
+                sLog.outErrorDb("`creature_linking` has a non existing slave (guid: %u, master_guid %u), skipped", slaveEntry, pTmp->masterId);
             return false;
         }
         if (!masterData)
         {
-            sLog.outErrorDb("`creature_linking` has a non existing master (guid: %u,, master_guid: %u), skipped", slaveEntry, pTmp->masterId);
+            if (!sObjectMgr.IsExistingCreatureGuid(pTmp->masterId))
+                sLog.outErrorDb("`creature_linking` has a non existing master (guid: %u,, master_guid: %u), skipped", slaveEntry, pTmp->masterId);
             return false;
         }
         if (slaveData->mapid != masterData->mapid)
@@ -530,9 +532,17 @@ void CreatureLinkingHolder::ProcessSlave(CreatureLinkingEvent eventType, Creatur
                 return;
 
             if (pSlave->isInCombat())
-                pSlave->SetInCombatWith(pEnemy);
-            else
+            {
+                if (pSource->GetMap()->IsDungeon() && (pSource->GetCreatureInfo()->flags_extra & CREATURE_FLAG_EXTRA_AGGRO_ZONE))
+                    pSlave->SetInCombatWithZone();
+                else
+                    pSlave->SetInCombatWith(pEnemy);
+            }
+            else {
                 pSlave->AI()->AttackStart(pEnemy);
+                if (pSource->GetMap()->IsDungeon() && (pSource->GetCreatureInfo()->flags_extra & CREATURE_FLAG_EXTRA_AGGRO_ZONE))
+                    pSlave->SetInCombatWithZone();
+            }
         }
         break;
     case LINKING_EVENT_EVADE:

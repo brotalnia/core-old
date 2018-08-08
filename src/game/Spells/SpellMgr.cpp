@@ -35,12 +35,6 @@ SpellMgr::SpellMgr()
 {
 }
 
-SpellMgr::~SpellMgr()
-{
-    for (SpellEntryMap::iterator it = mSpellEntryMap.begin(); it != mSpellEntryMap.end(); ++it)
-        delete *it;
-}
-
 SpellMgr& SpellMgr::Instance()
 {
     static SpellMgr spellMgr;
@@ -122,7 +116,11 @@ uint32 GetSpellCastTime(SpellEntry const* spellInfo, Spell* spell)
                 modOwner->ApplySpellMod(spellInfo->Id, SPELLMOD_CASTING_TIME, castTime, spell);
 
         if (!(spellInfo->Attributes & (SPELL_ATTR_IS_ABILITY | SPELL_ATTR_TRADESPELL)))
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
             castTime = int32(castTime * spell->GetCaster()->GetFloatValue(UNIT_MOD_CAST_SPEED));
+#else
+            castTime = int32(castTime * (1.0f + spell->GetCaster()->GetInt32Value(UNIT_MOD_CAST_SPEED)/100.0f));
+#endif
         else
         {
             if (spell->IsRangedSpell() && !spell->IsAutoRepeat())
@@ -614,7 +612,8 @@ SpellSpecific GetSpellSpecific(uint32 spellId)
                 return SPELL_NEGATIVE_HASTE;
 
     // Movement speed reduction
-    if (IsSpellHaveSingleAura(spellInfo, SPELL_AURA_MOD_DECREASE_SPEED))
+    // Dazes are not affected
+    if (IsSpellHaveSingleAura(spellInfo, SPELL_AURA_MOD_DECREASE_SPEED) && !(spellInfo->AttributesEx & SPELL_ATTR_EX_UNK18))
         return SPELL_SNARE;
 
     return SPELL_NORMAL;
@@ -1023,82 +1022,6 @@ bool IsHealSpell(SpellEntry const *spellProto)
     return false;
 }
 
-bool IsSingleTargetSpell(SpellEntry const *spellInfo)
-{
-    // exceptions (have spellInfo->AttributesEx & (1<<18) but not single targeted)
-    switch (spellInfo->SpellFamilyName)
-    {
-        case SPELLFAMILY_GENERIC:
-            switch (spellInfo->Id)
-            {
-                case 4538:                                          // Extract Essence (group targets)
-                case 5106:                                          // Crystal Flash (group targets)
-                case 5530:                                          // Mace Stun Effect
-                case 5648:                                          // Stunning Blast, rank 1
-                case 5649:                                          // Stunning Blast, rank 2
-                case 5726:                                          // Stunning Blow, Rank 1
-                case 5727:                                          // Stunning Blow, Rank 2
-                case 6927:                                          // Shadowstalker Slash, Rank 1
-                case 8399:                                          // Sleep (group targets)
-                case 9159:                                          // Sleep (armor triggred affect)
-                case 9256:                                          // Deep Sleep (group targets)
-                case 13902:                                         // Fist of Ragnaros
-                case 16104:                                         // Crystallize (group targets)
-                case 17286:                                         // Crusader's Hammer (group targets)
-                case 20277:                                         // Fist of Ragnaros (group targets)
-                case 20669:                                         // Sleep (group targets)
-                case 20683:                                         // Highlord's Justice
-                case 24664:                                         // Sleep (group targets)
-                    return false;
-            }
-            break;
-        case SPELLFAMILY_HUNTER:
-            // Hunter's Mark
-            if (spellInfo->SpellVisual == 3239)
-                return true;
-            // Freezing Trap
-            else if (spellInfo->IsFitToFamilyMask<CF_HUNTER_FREEZING_TRAP_EFFECT>())
-                return false;
-            break;
-        case SPELLFAMILY_ROGUE:
-            // Cheap Shot
-            if (spellInfo->IsFitToFamilyMask<CF_ROGUE_CHEAP_SHOT>())
-                return false;
-            break;
-    } 
-
-    // cannot be cast on another target while not cooled down anyway
-    if (GetSpellDuration(spellInfo) < int32(GetSpellRecoveryTime(spellInfo)))
-        return false;
-
-    // all other single target spells have if it has AttributesEx
-    if (spellInfo->AttributesEx & (1 << 18))
-        return true;
-
-    // other single target
-    //Fear
-    if ((spellInfo->SpellIconID == 98 && spellInfo->SpellFamilyName == SPELLFAMILY_WARLOCK)
-      //Banish
-      || (spellInfo->SpellIconID == 96 && spellInfo->SpellVisual == 1305))
-             return true;
-
-    // Entangling roots -> Can still have on several targets using [Nature's Grasp] (fixed in patch 2.2)
-    if (spellInfo->IsFitToFamily<SPELLFAMILY_DRUID, CF_DRUID_ENTANGLING_ROOTS>() && spellInfo->Id != 19975)
-        return true;
-
-    // TODO - need found Judgements rule
-    switch (GetSpellSpecific(spellInfo->Id))
-    {
-        case SPELL_JUDGEMENT:
-        case SPELL_MAGE_POLYMORPH:
-            return true;
-        default:
-            break;
-    }
-
-    return false;
-}
-
 bool IsSingleTargetSpells(SpellEntry const *spellInfo1, SpellEntry const *spellInfo2)
 {
     // TODO - need better check
@@ -1176,7 +1099,7 @@ void SpellMgr::LoadSpellTargetPositions()
     uint32 count = 0;
 
     //                                                0   1           2                  3                  4                  5
-    QueryResult *result = WorldDatabase.Query("SELECT id, target_map, target_position_x, target_position_y, target_position_z, target_orientation FROM spell_target_position");
+    QueryResult *result = WorldDatabase.PQuery("SELECT id, target_map, target_position_x, target_position_y, target_position_z, target_orientation FROM spell_target_position WHERE (build_min <= %u) && (build_max >= %u)", SUPPORTED_CLIENT_BUILD, SUPPORTED_CLIENT_BUILD);
     if (!result)
     {
         BarGoLink bar(1);
@@ -1447,7 +1370,7 @@ void SpellMgr::LoadSpellProcEvents()
     mSpellProcEventMap.clear();                             // need for reload case
 
     //                                                0      1           2                3                 4                 5                 6          7       8        9             10
-    QueryResult *result = WorldDatabase.Query("SELECT entry, SchoolMask, SpellFamilyName, SpellFamilyMask0, SpellFamilyMask1, SpellFamilyMask2, procFlags, procEx, ppmRate, CustomChance, Cooldown FROM spell_proc_event");
+    QueryResult *result = WorldDatabase.PQuery("SELECT entry, SchoolMask, SpellFamilyName, SpellFamilyMask0, SpellFamilyMask1, SpellFamilyMask2, procFlags, procEx, ppmRate, CustomChance, Cooldown FROM spell_proc_event WHERE (build_min <= %u) && (build_max >= %u)", SUPPORTED_CLIENT_BUILD, SUPPORTED_CLIENT_BUILD);
     if (!result)
     {
         BarGoLink bar(1);
@@ -2891,7 +2814,7 @@ void SpellMgr::LoadSpellChains()
     }
 
     // load custom case
-    QueryResult *result = WorldDatabase.Query("SELECT spell_id, prev_spell, first_spell, rank, req_spell FROM spell_chain");
+    QueryResult *result = WorldDatabase.PQuery("SELECT spell_id, prev_spell, first_spell, rank, req_spell FROM spell_chain WHERE (build_min <= %u) && (build_max >= %u)", SUPPORTED_CLIENT_BUILD, SUPPORTED_CLIENT_BUILD);
     if (!result)
     {
         BarGoLink bar(1);
@@ -3162,7 +3085,7 @@ void SpellMgr::LoadSpellLearnSpells()
     mSpellLearnSpells.clear();                              // need for reload case
 
     //                                                0      1        2
-    QueryResult *result = WorldDatabase.Query("SELECT entry, SpellID, Active FROM spell_learn_spell");
+    QueryResult *result = WorldDatabase.PQuery("SELECT entry, SpellID, Active FROM spell_learn_spell WHERE (build_min <= %u) && (build_max >= %u)", SUPPORTED_CLIENT_BUILD, SUPPORTED_CLIENT_BUILD);
     if (!result)
     {
         BarGoLink bar(1);
@@ -4229,7 +4152,7 @@ void SpellMgr::LoadSpellAffects()
     uint32 count = 0;
 
     //                                                0      1         2
-    QueryResult *result = WorldDatabase.Query("SELECT entry, effectId, SpellFamilyMask FROM spell_affect");
+    QueryResult *result = WorldDatabase.PQuery("SELECT entry, effectId, SpellFamilyMask FROM spell_affect WHERE (build_min <= %u) && (build_max >= %u)", SUPPORTED_CLIENT_BUILD, SUPPORTED_CLIENT_BUILD);
     if (!result)
     {
 
@@ -4320,54 +4243,9 @@ void SpellMgr::LoadSpellAffects()
             if (mSpellAffectMap.find((id << 8) + effectId) !=  mSpellAffectMap.end())
                 continue;
 
-            sLog.outErrorDb("Spell %u (%s) misses spell_affect for effect %u", id, spellInfo->SpellName[sWorld.GetDefaultDbcLocale()], effectId);
+            sLog.outErrorDb("Spell %u (%s) misses spell_affect for effect %u", id, spellInfo->SpellName[sWorld.GetDefaultDbcLocale()].c_str(), effectId);
         }
     }
-}
-
-void SpellMgr::LoadFacingCasterFlags()
-{
-    mSpellFacingFlagMap.clear();
-    uint32 count = 0;
-
-    //                                                0              1
-    QueryResult *result = WorldDatabase.Query("SELECT entry, facingcasterflag FROM spell_facing");
-    if (!result)
-    {
-        BarGoLink bar(1);
-        bar.step();
-        sLog.outString();
-        sLog.outString(">> Loaded %u facing caster flags", count);
-        return;
-    }
-
-    BarGoLink bar(result->GetRowCount());
-
-    do
-    {
-        Field *fields = result->Fetch();
-
-        bar.step();
-
-        uint32 entry              = fields[0].GetUInt32();
-        uint32 FacingCasterFlags  = fields[1].GetUInt32();
-
-        SpellEntry const* spellInfo = sSpellMgr.GetSpellEntry(entry);
-        if (!spellInfo)
-        {
-            sLog.outErrorDb("Spell %u listed in `spell_facing` does not exist", entry);
-            continue;
-        }
-        mSpellFacingFlagMap[entry]    = FacingCasterFlags;
-
-        ++count;
-    }
-    while (result->NextRow());
-
-    delete result;
-
-    sLog.outString();
-    sLog.outString(">> Loaded %u facing caster flags", count);
 }
 
 void SpellMgr::LoadSpells()
@@ -4388,7 +4266,7 @@ void SpellMgr::LoadSpells()
     delete result;
 
     // Actually loading the spells.
-    result = WorldDatabase.Query("SELECT * FROM spell_template");
+    result = WorldDatabase.PQuery("SELECT * FROM spell_template WHERE build=%u", SUPPORTED_CLIENT_BUILD);
 
     if (!result)
     {
@@ -4396,13 +4274,13 @@ void SpellMgr::LoadSpells()
         return;
     }
     
-    mSpellEntryMap.resize(maxEntry, nullptr);
+    mSpellEntryMap.resize(maxEntry);
 
     do
     {
         fields = result->Fetch();
 
-        SpellEntry* spell = new SpellEntry();
+        std::unique_ptr<SpellEntry> spell = std::make_unique<SpellEntry>();
 
         uint32 spellId = fields[0].GetUInt32();
 
@@ -4526,39 +4404,23 @@ void SpellMgr::LoadSpells()
         spell->SpellIconID = fields[117].GetUInt32();
         spell->activeIconID = fields[118].GetUInt32();
         spell->spellPriority = fields[119].GetUInt32();
-        spell->SpellName[0] = new char[strlen(fields[120].GetString()) + 1];
-        strcpy(spell->SpellName[0], fields[120].GetString());
-        spell->SpellName[1] = new char[strlen(fields[121].GetString()) + 1];
-        strcpy(spell->SpellName[1], fields[121].GetString());
-        spell->SpellName[2] = new char[strlen(fields[122].GetString()) + 1];
-        strcpy(spell->SpellName[2], fields[122].GetString());
-        spell->SpellName[3] = new char[strlen(fields[123].GetString()) + 1];
-        strcpy(spell->SpellName[3], fields[123].GetString());
-        spell->SpellName[4] = new char[strlen(fields[124].GetString()) + 1];
-        strcpy(spell->SpellName[4], fields[124].GetString());
-        spell->SpellName[5] = new char[strlen(fields[125].GetString()) + 1];
-        strcpy(spell->SpellName[5], fields[125].GetString());
-        spell->SpellName[6] = new char[strlen(fields[126].GetString()) + 1];
-        strcpy(spell->SpellName[6], fields[126].GetString());
-        spell->SpellName[7] = new char[strlen(fields[127].GetString()) + 1];
-        strcpy(spell->SpellName[7], fields[127].GetString());
+        spell->SpellName[0] = fields[120].GetCppString();
+        spell->SpellName[1] = fields[121].GetCppString();
+        spell->SpellName[2] = fields[122].GetCppString();
+        spell->SpellName[3] = fields[123].GetCppString();
+        spell->SpellName[4] = fields[124].GetCppString();
+        spell->SpellName[5] = fields[125].GetCppString();
+        spell->SpellName[6] = fields[126].GetCppString();
+        spell->SpellName[7] = fields[127].GetCppString();
         //spell->SpellNameFlag = fields[128].GetUInt32(); not used
-        spell->Rank[0] = new char[strlen(fields[129].GetString()) + 1];
-        strcpy(spell->Rank[0], fields[129].GetString());
-        spell->Rank[1] = new char[strlen(fields[130].GetString()) + 1];
-        strcpy(spell->Rank[1], fields[130].GetString());
-        spell->Rank[2] = new char[strlen(fields[131].GetString()) + 1];
-        strcpy(spell->Rank[2], fields[131].GetString());
-        spell->Rank[3] = new char[strlen(fields[132].GetString()) + 1];
-        strcpy(spell->Rank[3], fields[132].GetString());
-        spell->Rank[4] = new char[strlen(fields[133].GetString()) + 1];
-        strcpy(spell->Rank[4], fields[133].GetString());
-        spell->Rank[5] = new char[strlen(fields[134].GetString()) + 1];
-        strcpy(spell->Rank[5], fields[134].GetString());
-        spell->Rank[6] = new char[strlen(fields[135].GetString()) + 1];
-        strcpy(spell->Rank[6], fields[135].GetString());
-        spell->Rank[7] = new char[strlen(fields[136].GetString()) + 1];
-        strcpy(spell->Rank[7], fields[136].GetString());
+        spell->Rank[0] = fields[129].GetCppString();
+        spell->Rank[1] = fields[130].GetCppString();
+        spell->Rank[2] = fields[131].GetCppString();
+        spell->Rank[3] = fields[132].GetCppString();
+        spell->Rank[4] = fields[133].GetCppString();
+        spell->Rank[5] = fields[134].GetCppString();
+        spell->Rank[6] = fields[135].GetCppString();
+        spell->Rank[7] = fields[136].GetCppString();
         /* not used
         spell->RankFlags = fields[137].GetUInt32();
         spell->Description[0] = new char[strlen(fields[138].GetString()) + 1];
@@ -4599,23 +4461,24 @@ void SpellMgr::LoadSpells()
         spell->ManaCostPercentage = fields[156].GetUInt32();
         spell->StartRecoveryCategory = fields[157].GetUInt32();
         spell->StartRecoveryTime = fields[158].GetUInt32();
-        spell->MaxTargetLevel = fields[159].GetUInt32();
-        spell->SpellFamilyName = fields[160].GetUInt32();
-        spell->SpellFamilyFlags = fields[161].GetUInt64();
-        spell->MaxAffectedTargets = fields[162].GetUInt32();
-        spell->DmgClass = fields[163].GetUInt32();
-        spell->PreventionType = fields[164].GetUInt32();
-        //spell->StanceBarOrder = fields[165].GetInt32();
-        spell->DmgMultiplier[0] = fields[166].GetFloat();
-        spell->DmgMultiplier[1] = fields[167].GetFloat();
-        spell->DmgMultiplier[2] = fields[168].GetFloat();
-        //spell->MinFactionId = fields[169].GetUInt32();
-        //spell->MinReputation = fields[170].GetUInt32();
-        //spell->RequiredAuraVision = fields[171].GetUInt32();
-        spell->Custom = 0;
+        spell->MinTargetLevel = fields[159].GetUInt32();
+        spell->MaxTargetLevel = fields[160].GetUInt32();
+        spell->SpellFamilyName = fields[161].GetUInt32();
+        spell->SpellFamilyFlags = fields[162].GetUInt64();
+        spell->MaxAffectedTargets = fields[163].GetUInt32();
+        spell->DmgClass = fields[164].GetUInt32();
+        spell->PreventionType = fields[165].GetUInt32();
+        //spell->StanceBarOrder = fields[166].GetInt32();
+        spell->DmgMultiplier[0] = fields[167].GetFloat();
+        spell->DmgMultiplier[1] = fields[168].GetFloat();
+        spell->DmgMultiplier[2] = fields[169].GetFloat();
+        //spell->MinFactionId = fields[170].GetUInt32();
+        //spell->MinReputation = fields[171].GetUInt32();
+        //spell->RequiredAuraVision = fields[172].GetUInt32();
+        spell->Custom = fields[173].GetUInt32();
 
         spell->InitCachedValues();
-        mSpellEntryMap[spellId] = spell;
+        mSpellEntryMap[spellId] = std::move(spell);
 
     } while (result->NextRow());
 

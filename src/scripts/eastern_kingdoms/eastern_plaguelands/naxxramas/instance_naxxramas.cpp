@@ -214,10 +214,15 @@ void instance_naxxramas::OnCreatureEnterCombat(Creature * creature)
 
 bool instance_naxxramas::WingsAreCleared()
 {
-    return GetData(TYPE_MAEXXNA) == DONE
-        && GetData(TYPE_THADDIUS) == DONE
-        && GetData(TYPE_LOATHEB) == DONE
-        && GetData(TYPE_FOUR_HORSEMEN) == DONE;
+    // All bosses must be dead, not just the end bosses. Some bosses aren't gated
+    // so we just check them all
+    for (int i = 0; i < TYPE_SAPPHIRON; ++i)
+    {
+        if (GetData(i) != DONE)
+            return false;
+    }
+
+    return true;
 }
 
 void instance_naxxramas::UpdateAutomaticBossEntranceDoor(NaxxGOs which, uint32 uiData, int requiredPreBossData)
@@ -1653,17 +1658,39 @@ struct mob_toxic_tunnelAI : public ScriptedAI
         Reset();
     }
     uint32 checktime;
+    uint32 _evadeTimer;
     void Reset() override
     {
         checktime = 0;
+        _evadeTimer = 0;
     }
 
     void AttackStart(Unit*) { }
     void MoveInLineOfSight(Unit*) { }
 
+    void EnterCombat(Unit*) override
+    {
+        // Poison aura is hitting someone. Start a short timer to evade & drop combat
+        if (!_evadeTimer)
+            _evadeTimer = 5000;
+    }
+
     void UpdateAI(const uint32 diff) override
     {
-        if (checktime < diff)
+        if (!!_evadeTimer)
+        {
+            if (_evadeTimer <= diff)
+            {
+                EnterEvadeMode();
+                _evadeTimer = 0;
+            }
+            else
+                _evadeTimer -= diff;
+        }
+
+        // creature_template_addons should make this aura permanent, but check anyway due
+        // to some reports of it not recasting
+        if (checktime <= diff)
         {
             checktime = 5000;
             if (!m_creature->HasAura(28370))

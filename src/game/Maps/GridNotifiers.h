@@ -333,6 +333,28 @@ namespace MaNGOS
         template<class NOT_INTERESTED> void Visit(GridRefManager<NOT_INTERESTED> &) {}
     };
 
+    template<class Do>
+    struct MANGOS_DLL_DECL UnitWorker
+    {
+        Do& i_do;
+
+        explicit UnitWorker(Do& _do) : i_do(_do) {}
+
+        void Visit(PlayerMapType &m)
+        {
+            for (PlayerMapType::iterator itr = m.begin(); itr != m.end(); ++itr)
+                i_do(itr->getSource());
+        }
+
+        void Visit(CreatureMapType &m)
+        {
+            for (CreatureMapType::iterator itr = m.begin(); itr != m.end(); ++itr)
+                i_do(itr->getSource());
+        }
+
+        template<class NOT_INTERESTED> void Visit(GridRefManager<NOT_INTERESTED> &) {}
+    };
+
     // Last accepted by Check Unit if any (Check can change requirements at each call)
     template<class Check>
         struct MANGOS_DLL_DECL UnitLastSearcher
@@ -818,12 +840,15 @@ namespace MaNGOS
     class NearestAttackableUnitInObjectRangeCheck
     {
         public:
-            NearestAttackableUnitInObjectRangeCheck(WorldObject const* obj, Unit const* funit, float range) : i_obj(obj), i_funit(funit), i_range(range) {}
+            NearestAttackableUnitInObjectRangeCheck(WorldObject const* obj, Unit const* funit, Unit const* owner, float range) : i_obj(obj), i_funit(funit), i_owner(owner), i_range(range) {}
             WorldObject const& GetFocusObject() const { return *i_obj; }
             bool operator()(Unit* u)
             {
+                if (i_owner && i_owner->IsPlayer() && u->IsPlayer() && !i_owner->IsPvP() && !i_owner->ToPlayer()->IsInDuelWith(u->ToPlayer()))
+                    return false;
+
                 if (i_obj->IsWithinDistInMap(u, i_range) && i_funit->IsValidAttackTarget(u) &&
-                    u->isVisibleForOrDetect(i_funit, i_funit, false))
+                    u->isVisibleForOrDetect(i_funit, i_funit, false) && i_funit->IsHostileTo(u))
                 {
                     i_range = i_obj->GetDistance(u);        // use found unit range as new range limit for next check
                     return true;
@@ -834,6 +859,7 @@ namespace MaNGOS
         private:
             WorldObject const* i_obj;
             Unit const* i_funit;
+            Unit const* i_owner;
             float i_range;
 
             // prevent clone this object
@@ -853,7 +879,7 @@ namespace MaNGOS
             bool operator()(Unit* u)
             {
                 // Check contains checks for: live, non-selectable, non-attackable flags, flight check and GM check, ignore totems
-                if (!u->isTargetableForAttack())
+                if (!u->isTargetableForAttack(false, i_originalCaster->IsPlayer()))
                     return false;
 
                 // ignore totems as AoE targets
@@ -895,7 +921,7 @@ namespace MaNGOS
             bool operator()(Unit* u)
             {
                 // Check contains checks for: live, non-selectable, non-attackable flags, flight check and GM check, ignore totems
-                if (!u->isTargetableForAttack())
+                if (!u->isTargetableForAttack(false, i_obj->IsPlayer()))
                     return false;
 
                 if(u->GetTypeId()==TYPEID_UNIT && ((Creature*)u)->IsImmuneToAoe())

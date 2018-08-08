@@ -62,8 +62,8 @@ int CreatureEventAI::Permissible(const Creature *creature)
 void CreatureEventAI::GetAIInformation(ChatHandler& reader)
 {
     reader.PSendSysMessage(LANG_NPC_EVENTAI_PHASE, (uint32)m_Phase);
-    reader.PSendSysMessage(LANG_NPC_EVENTAI_MOVE, reader.GetOnOffStr(m_CombatMovementEnabled));
-    reader.PSendSysMessage(LANG_NPC_EVENTAI_COMBAT, reader.GetOnOffStr(m_MeleeEnabled));
+    reader.PSendSysMessage(LANG_NPC_EVENTAI_MOVE, reader.GetOnOffStr(m_bCombatMovement));
+    reader.PSendSysMessage(LANG_NPC_EVENTAI_COMBAT, reader.GetOnOffStr(m_bMeleeAttack));
 }
 
 CreatureEventAI::CreatureEventAI(Creature *c) : CreatureAI(c)
@@ -112,6 +112,7 @@ CreatureEventAI::CreatureEventAI(Creature *c) : CreatureAI(c)
     m_InvinceabilityHpLevel = 0;
 
     //Handle Spawned Events
+    c->SetAI(this);
     if (!m_bEmptyList)
     {
         for (CreatureEventAIList::iterator i = m_CreatureEventAIList.begin(); i != m_CreatureEventAIList.end(); ++i)
@@ -357,6 +358,9 @@ bool CreatureEventAI::ProcessEvent(CreatureEventAIHolder& pHolder, Unit* pAction
             pHolder.UpdateRepeatTimer(m_creature, event.move_inform.repeatMin, event.move_inform.repeatMax);
             break;
         }
+        case EVENT_T_MAP_SCRIPT_EVENT:
+        case EVENT_T_GROUP_MEMBER_DIED:
+            break;
         default:
             sLog.outErrorDb("CreatureEventAI: Creature %u using Event %u has invalid Event Type(%u), missing from ProcessEvent() Switch.", m_creature->GetEntry(), pHolder.Event.event_id, pHolder.Event.event_type);
             break;
@@ -518,13 +522,6 @@ void CreatureEventAI::JustDied(Unit* killer)
 {
     Reset();
 
-    if (m_creature->IsGuard())
-    {
-        //Send Zone Under Attack message to the LocalDefense and WorldDefense Channels
-        if (Player* pKiller = killer->GetCharmerOrOwnerPlayerOrPlayerItself())
-            m_creature->SendZoneUnderAttackMessage(pKiller);
-    }
-
     if (m_bEmptyList)
         return;
 
@@ -624,13 +621,13 @@ void CreatureEventAI::AttackStart(Unit *who)
     if (!who)
         return;
 
-    if (m_creature->Attack(who, m_MeleeEnabled))
+    if (m_creature->Attack(who, m_bMeleeAttack))
     {
         m_creature->AddThreat(who);
         m_creature->SetInCombatWith(who);
         who->SetInCombatWith(m_creature);
 
-        if (m_CombatMovementEnabled)
+        if (m_bCombatMovement)
             m_creature->GetMotionMaster()->MoveChase(who, m_AttackDistance, m_AttackAngle);
     }
 }
@@ -842,5 +839,36 @@ void CreatureEventAI::DamageTaken(Unit* /*done_by*/, uint32& damage)
             damage = 0;
         else
             damage = m_creature->GetHealth() - m_InvinceabilityHpLevel;
+    }
+}
+
+void CreatureEventAI::MapScriptEventHappened(ScriptedEvent* pEvent, uint32 uiData)
+{
+    if (m_bEmptyList)
+        return;
+
+    for (CreatureEventAIList::iterator i = m_CreatureEventAIList.begin(); i != m_CreatureEventAIList.end(); ++i)
+    {
+        if ((*i).Event.event_type == EVENT_T_MAP_SCRIPT_EVENT)
+            if (((*i).Event.map_event.eventId == pEvent->m_uiEventId) && ((*i).Event.map_event.data == uiData))
+                ProcessEvent(*i);
+    }
+}
+
+void CreatureEventAI::GroupMemberJustDied(Creature* pUnit, bool isLeader)
+{
+    if (m_bEmptyList)
+        return;
+
+    for (CreatureEventAIList::iterator i = m_CreatureEventAIList.begin(); i != m_CreatureEventAIList.end(); ++i)
+    {
+        if ((*i).Event.event_type == EVENT_T_GROUP_MEMBER_DIED)
+        {
+            if ((*i).Event.group_member_died.creatureId && ((*i).Event.group_member_died.creatureId != pUnit->GetEntry()))
+                continue;
+
+            if (((bool)(*i).Event.group_member_died.isLeader) == isLeader)
+                ProcessEvent(*i);
+        } 
     }
 }

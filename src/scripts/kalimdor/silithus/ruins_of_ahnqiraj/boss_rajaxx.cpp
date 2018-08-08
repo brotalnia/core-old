@@ -128,7 +128,7 @@ struct boss_rajaxxAI : public ScriptedAI
         m_uiNextWave_Timer = 0;
         m_uiNextWaveIndex = 0;
 
-        if (m_pInstance)
+        if (m_pInstance && m_creature->isAlive())
         {
             for (uint8 waveIndex = 0; waveIndex < WAVE_MAX; ++waveIndex)
                 ResetWave(waveIndex);
@@ -138,7 +138,7 @@ struct boss_rajaxxAI : public ScriptedAI
 
     void ResetWave(uint8 waveIndex)
     {
-        if (!m_pInstance)
+        if (!m_pInstance || !m_creature->isAlive())
             return;
         if (waveIndex >= WAVE_MAX)
             return;
@@ -482,7 +482,7 @@ struct npc_andorovAI : public ScriptedAI
         {
             DoScriptText(SAY_ANDOROV_INTRO, m_creature);
 
-            m_creature->GetMotionMaster()->MoveWaypoint(false);
+            m_creature->GetMotionMaster()->MoveWaypoint(0, 0, 0, 0, 0, false);
 
             m_pInstance->SetData(TYPE_GENERAL_ANDOROV, IN_PROGRESS);
         }

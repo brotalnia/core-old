@@ -1442,7 +1442,7 @@ struct go_fixed_trap : public GameObjectAI
                 pSlipkik->DeleteThreatList();
                 pSlipkik->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PASSIVE);
                 pSlipkik->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE);
-                pSlipkik->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_OOC_NOT_ATTACKABLE);
+                pSlipkik->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER);
                 pSlipkik->CastSpell(pSlipkik, SPELL_ICE_LOCK, true, NULL);
                 me->SendGameObjectCustomAnim();
                 me->Delete();
@@ -2383,7 +2383,7 @@ struct boss_magister_kalendrisAI:public ScriptedAI
                 m_bShadowformUsed = true;
         }
 
-        if (!IsCombatMovement())
+        if (!IsCombatMovementEnabled())
         { //Melee
             if (!m_bInMeele && (m_creature->GetDistance2d(m_creature->getVictim()) < 5.0f || m_creature->GetDistance2d(m_creature->getVictim()) > 30.0f || !m_creature->IsWithinLOSInMap(m_creature->getVictim()) || m_creature->GetPowerPercent(POWER_MANA) < 5.0f))
             {

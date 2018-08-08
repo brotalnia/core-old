@@ -35,6 +35,7 @@
 #include "Utilities/UnorderedMapSet.h"
 
 #include <map>
+#include <memory>
 
 class Player;
 class Spell;
@@ -53,7 +54,9 @@ enum SpellAttributeCustom
     SPELL_CUSTOM_CHAN_NO_DIST_LIMIT         = 0x008,
     SPELL_CUSTOM_FIXED_DAMAGE               = 0x010,
     SPELL_CUSTOM_IGNORE_ARMOR               = 0x020,
-    SPELL_CUSTOM_FROM_BEHIND                = 0x040     // For spells that require the caster to be behind the target
+    SPELL_CUSTOM_FROM_BEHIND                = 0x040,     // For spells that require the caster to be behind the target
+    SPELL_CUSTOM_FROM_FRONT                 = 0x080,     // For spells that require the target to be in front of the caster
+    SPELL_CUSTOM_SINGLE_TARGET_AURA         = 0x100,     // Aura applied by spell can only be on 1 target at a time
 };
 
 // only used in code
@@ -252,6 +255,11 @@ inline bool IsElementalShield(SpellEntry const *spellInfo)
     return spellInfo->IsFitToFamilyMask<CF_SHAMAN_LIGHTNING_SHIELD>() || spellInfo->Id == 23552;
 }
 
+inline bool IsFromBehindOnlySpell(SpellEntry const *spellInfo)
+{
+    return ((spellInfo->AttributesEx2 == 0x100000 && (spellInfo->AttributesEx & 0x200) == 0x200) || (spellInfo->Custom & SPELL_CUSTOM_FROM_BEHIND));
+}
+
 int32 CompareAuraRanks(uint32 spellId_1, uint32 spellId_2);
 bool CompareSpellSpecificAuras(SpellEntry const* spellInfo_1, SpellEntry const* spellInfo_2);
 
@@ -302,7 +310,11 @@ bool IsHealSpell(SpellEntry const *spellProto);
 bool IsExplicitPositiveTarget(uint32 targetA);
 bool IsExplicitNegativeTarget(uint32 targetA);
 
-bool IsSingleTargetSpell(SpellEntry const *spellInfo);
+inline bool HasSingleTargetAura(SpellEntry const *spellInfo)
+{
+    return spellInfo->Custom & SPELL_CUSTOM_SINGLE_TARGET_AURA;
+}
+
 bool IsSingleTargetSpells(SpellEntry const *spellInfo1, SpellEntry const *spellInfo2);
 
 inline bool IsCasterSourceTarget(uint32 target)
@@ -531,6 +543,11 @@ inline bool NeedsComboPoints(SpellEntry const* spellInfo)
 inline bool IsTotemSummonSpell(SpellEntry const* spellInfo)
 {
     return spellInfo->Effect[0] >= SPELL_EFFECT_SUMMON_TOTEM_SLOT1 && spellInfo->Effect[0] <= SPELL_EFFECT_SUMMON_TOTEM_SLOT4;
+}
+
+inline bool HasRealTimeDuration(SpellEntry const* spellInfo)
+{
+    return spellInfo->AttributesEx4 & SPELL_ATTR_EX4_REAL_TIME_DURATION;
 }
 
 // Spell effects require a specific power type on the target
@@ -938,8 +955,7 @@ inline bool IsProfessionOrRidingSkill(uint32 skill)
     return  IsProfessionSkill(skill) || skill == SKILL_RIDING;
 }
 
-typedef std::map<uint32, uint32> SpellFacingFlagMap;
-typedef std::vector<SpellEntry*> SpellEntryMap;
+typedef std::vector<std::unique_ptr<SpellEntry>> SpellEntryMap;
 
 class SpellMgr
 {
@@ -950,7 +966,7 @@ class SpellMgr
     // Constructors
     public:
         SpellMgr();
-        ~SpellMgr();
+        ~SpellMgr() = default;
 
     // Accessors (const or static functions)
     public:
@@ -1140,14 +1156,6 @@ class SpellMgr
                 return &itr->second;
 
             return NULL;
-        }
-
-        uint32 GetSpellFacingFlag(uint32 spellId) const
-        {
-            SpellFacingFlagMap::const_iterator itr =  mSpellFacingFlagMap.find(spellId);
-            if(itr != mSpellFacingFlagMap.end())
-                return itr->second;
-            return 0x0;
         }
 
         // Spell target coordinates
@@ -1355,24 +1363,30 @@ class SpellMgr
         void LoadSkillRaceClassInfoMap();
         void LoadSpellPetAuras();
         void LoadSpellAreas();
-        void LoadFacingCasterFlags();
 
         // SPELL GROUPS
         void LoadSpellGroups();
         void LoadSpellGroupStackRules();
         // SpellEntry
         void LoadSpells();
-        SpellEntry const* GetSpellEntry(uint32 spellId) const { return spellId < GetMaxSpellId() ? mSpellEntryMap[spellId] : NULL; }
+        SpellEntry const* GetSpellEntry(uint32 spellId) const { return spellId < GetMaxSpellId() ? mSpellEntryMap[spellId].get() : nullptr; }
         uint32 GetMaxSpellId() const { return mSpellEntryMap.size(); }
             // spell_mod
-        bool SetSpellEntry(uint32 id, SpellEntry* ptr)
+        SpellEntry const*  OverwriteSpellEntry(uint32 id)
         {
             if (id < GetMaxSpellId())
             {
-                mSpellEntryMap[id] = ptr;
-                return true;
+                std::unique_ptr<SpellEntry> newSpell = std::make_unique<SpellEntry>();
+                newSpell->EquippedItemClass = -1;
+                for (uint32 i = 0; i < 8; ++i)
+                {
+                    newSpell->SpellName[i] = "CustomSpell";
+                }
+                newSpell->InitCachedValues();
+                mSpellEntryMap[id] = std::move(newSpell);
+                return mSpellEntryMap[id].get();
             }
-            return false;
+            return nullptr;
         }
 
     private:
@@ -1397,7 +1411,6 @@ class SpellMgr
         SpellAreaForQuestMap mSpellAreaForQuestEndMap;
         SpellAreaForAuraMap  mSpellAreaForAuraMap;
         SpellAreaForAreaMap  mSpellAreaForAreaMap;
-        SpellFacingFlagMap  mSpellFacingFlagMap;
 
         // SPELL GROUPS
         SpellSpellGroupMap mSpellSpellGroup;

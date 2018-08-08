@@ -46,6 +46,7 @@
 #include "MoveMap.h"
 #include "SocialMgr.h"
 #include "Chat.h"
+#include "Weather.h"
 #include "MovementBroadcaster.h"
 #include "PlayerBroadcaster.h"
 #include "GridSearchers.h"
@@ -75,6 +76,9 @@ Map::~Map()
     //release reference count
     if (m_TerrainData->Release())
         sTerrainMgr.UnloadTerrain(m_TerrainData->GetMapId());
+
+    delete m_weatherSystem;
+    m_weatherSystem = NULL;
 }
 
 void Map::LoadMapAndVMap(int gx, int gy)
@@ -99,7 +103,7 @@ Map::Map(uint32 id, time_t expiry, uint32 InstanceId)
       _lastPlayersUpdate(WorldTimer::getMSTime()), _lastMapUpdate(WorldTimer::getMSTime()),
       _lastCellsUpdate(WorldTimer::getMSTime()), _inactivePlayersSkippedUpdates(0),
       _objUpdatesThreads(0), _unitRelocationThreads(0), _lastPlayerLeftTime(0),
-      m_lastMvtSpellsUpdate(0)
+      m_lastMvtSpellsUpdate(0), m_uiScriptedEventsTimer(1000)
 {
     m_CreatureGuids.Set(sObjectMgr.GetFirstTemporaryCreatureLowGuid());
     m_GameObjectGuids.Set(sObjectMgr.GetFirstTemporaryGameObjectLowGuid());
@@ -122,6 +126,8 @@ Map::Map(uint32 id, time_t expiry, uint32 InstanceId)
 
     m_persistentState = sMapPersistentStateMgr.AddPersistentState(i_mapEntry, GetInstanceId(), 0, IsDungeon());
     m_persistentState->SetUsedByMapState(this);
+
+    m_weatherSystem = new WeatherSystem(this);
 }
 
 // Nostalrius
@@ -933,10 +939,20 @@ void Map::Update(uint32 t_diff)
     }
 
     ///- Process necessary scripts
+    if (m_uiScriptedEventsTimer <= t_diff)
+    {
+        UpdateScriptedEvents();
+        m_uiScriptedEventsTimer = 1000u;
+    }
+    else
+        m_uiScriptedEventsTimer -= t_diff;
+
     ScriptsProcess();
 
     if (i_data)
         i_data->Update(t_diff);
+
+    m_weatherSystem->UpdateWeathers(t_diff);
 
     bool packetBroadcastSlow = sWorld.GetBroadcaster()->IsMapSlow(GetInstanceId());
     if (sWorld.getConfig(CONFIG_UINT32_PERFLOG_SLOW_MAP_UPDATE) && updateMapTime > sWorld.getConfig(CONFIG_UINT32_PERFLOG_SLOW_MAP_UPDATE))
@@ -978,6 +994,110 @@ void Map::Update(uint32 t_diff)
         }
     }
     m_updateFinished = true;
+}
+
+void Map::UpdateScriptedEvents()
+{
+    for (auto itr = m_mScriptedEvents.begin(); itr != m_mScriptedEvents.end();)
+    {
+        if (itr->second.UpdateEvent())
+            m_mScriptedEvents.erase(itr++);
+        else
+            ++itr;
+    }
+}
+
+ScriptedEvent* Map::StartScriptedEvent(uint32 id, WorldObject* source, WorldObject* target, uint32 timelimit, uint32 failureCondition, uint32 failureScript, uint32 successCondition, uint32 successScript)
+{
+    if (m_mScriptedEvents.find(id) != m_mScriptedEvents.end())
+        return nullptr;
+    
+    auto itr = m_mScriptedEvents.emplace(std::piecewise_construct, std::forward_as_tuple(id), std::forward_as_tuple(id, source, target, this, time_t(sWorld.GetGameTime() + timelimit), failureCondition, failureScript, successCondition, successScript));
+
+    return &itr.first->second;
+}
+
+bool ScriptedEvent::UpdateEvent()
+{
+    if (m_tExpireTime < sWorld.GetGameTime())
+    {
+        EndEvent(false);
+        return true;
+    }
+
+    if (m_uiFailureCondition && sObjectMgr.IsConditionSatisfied(m_uiFailureCondition, m_pTarget, m_pMap, m_pSource, CONDITION_FROM_MAP_EVENT))
+    {
+        EndEvent(false);
+        return true;
+    }
+    else if (m_uiSuccessCondition && sObjectMgr.IsConditionSatisfied(m_uiSuccessCondition, m_pTarget, m_pMap, m_pSource, CONDITION_FROM_MAP_EVENT))
+    {
+        EndEvent(true);
+        return true;
+    }
+
+    for (const auto& target : m_vTargets)
+    {
+        if (target.uiFailureCondition && sObjectMgr.IsConditionSatisfied(target.uiFailureCondition, m_pTarget, m_pMap, target.pObject, CONDITION_FROM_MAP_EVENT))
+        {
+            EndEvent(false);
+            return true;
+        }
+        else if (target.uiSuccessCondition && sObjectMgr.IsConditionSatisfied(target.uiSuccessCondition, m_pTarget, m_pMap, target.pObject, CONDITION_FROM_MAP_EVENT))
+        {
+            EndEvent(true);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void ScriptedEvent::EndEvent(bool bSuccess)
+{
+    if (bSuccess && m_uiSuccessScript)
+        m_pMap->ScriptsStart(sEventScripts, m_uiSuccessScript, m_pSource, m_pTarget);
+    else if (!bSuccess && m_uiFailureScript)
+        m_pMap->ScriptsStart(sEventScripts, m_uiFailureScript, m_pSource, m_pTarget);
+
+    for (const auto& target : m_vTargets)
+    {
+        if (!target.pObject)
+            continue;
+
+        if (bSuccess && target.uiSuccessScript)
+            m_pMap->ScriptsStart(sEventScripts, target.uiSuccessScript, target.pObject, m_pTarget);
+        else if (!bSuccess && target.uiFailureScript)
+            m_pMap->ScriptsStart(sEventScripts, target.uiFailureScript, target.pObject, m_pTarget);
+    }
+}
+
+void ScriptedEvent::SendEventToMainTargets(uint32 uiData)
+{
+    if (Creature* pCreatureSource = ToCreature(m_pSource))
+        if (pCreatureSource->AI())
+            pCreatureSource->AI()->MapScriptEventHappened(this, uiData);
+
+    if (Creature* pCreatureTarget = ToCreature(m_pTarget))
+        if (pCreatureTarget->AI())
+            pCreatureTarget->AI()->MapScriptEventHappened(this, uiData);
+}
+
+void ScriptedEvent::SendEventToAdditionalTargets(uint32 uiData)
+{
+    for (const auto& target : m_vTargets)
+    {
+        if (Creature* pCreature = ToCreature(target.pObject))
+            if (pCreature->AI())
+                pCreature->AI()->MapScriptEventHappened(this, uiData);
+    }
+
+}
+void ScriptedEvent::SendEventToAllTargets(uint32 uiData)
+{
+    SendEventToMainTargets(uiData);
+
+    SendEventToAdditionalTargets(uiData);
 }
 
 void Map::Remove(Player *player, bool remove)
@@ -1561,6 +1681,20 @@ void Map::SendToPlayers(WorldPacket const* data) const
         itr->getSource()->GetSession()->SendPacket(data);
 }
 
+bool Map::SendToPlayersInZone(WorldPacket const* data, uint32 zoneId) const
+{
+    bool foundPlayer = false;
+    for (MapRefManager::const_iterator itr = m_mapRefManager.begin(); itr != m_mapRefManager.end(); ++itr)
+    {
+        if (itr->getSource()->GetZoneId() == zoneId)
+        {
+            itr->getSource()->GetSession()->SendPacket(data);
+            foundPlayer = true;
+        }
+    }
+    return foundPlayer;
+}
+
 bool Map::ActiveObjectsNearGrid(uint32 x, uint32 y) const
 {
     MANGOS_ASSERT(x < MAX_NUMBER_OF_GRIDS);
@@ -1730,6 +1864,12 @@ void Map::TeleportAllPlayersToHomeBind()
             plr->GetMapRef().unlink();
         }
     }
+}
+
+void Map::SetWeather(uint32 zoneId, WeatherType type, float grade, bool permanently)
+{
+    Weather* wth = m_weatherSystem->FindOrCreateWeather(zoneId);
+    wth->SetWeather(WeatherType(type), grade, this, permanently);
 }
 
 template void Map::Add(Corpse *);
@@ -1975,7 +2115,7 @@ bool DungeonMap::Reset(InstanceResetMethod method)
         {
             // notify the players to leave the instance so it can be reset
             for (MapRefManager::iterator itr = m_mapRefManager.begin(); itr != m_mapRefManager.end(); ++itr)
-                itr->getSource()->SendResetFailedNotify(GetId());
+                itr->getSource()->SendResetFailedNotify();
         }
         else
         {

@@ -468,9 +468,15 @@ void Spell::EffectSchoolDMG(SpellEffectIndex effect_idx)
                 // Ferocious Bite
                 if (m_spellInfo->IsFitToFamilyMask<CF_DRUID_RIP_BITE>() && m_spellInfo->SpellVisual == 6587)
                 {
+#if SUPPORTED_CLIENT_BUILD > CLIENT_BUILD_1_11_2
+                    // World of Warcraft Client Patch 1.12.0 (2006-08-22)
+                    // - Ferocious Bite: Book of Ferocious Bite (Rank 5) now drops off The
+                    //   Beast in Black Rock Spire. In addition, Ferocious Bite now increases
+                    //   in potency with greater attack power.
                     // ( AP * 3% * combo + energy * 2,7 + damage )
                     if (uint32 combo = ((Player*)m_caster)->GetComboPoints())
                         damage += int32(m_caster->GetTotalAttackPowerValue(BASE_ATTACK) * combo * 0.03f);
+#endif
                     damage += int32(m_caster->GetPower(POWER_ENERGY) * m_spellInfo->DmgMultiplier[effect_idx]);
                     m_caster->SetPower(POWER_ENERGY, 0);
                 }
@@ -478,12 +484,17 @@ void Spell::EffectSchoolDMG(SpellEffectIndex effect_idx)
             }
             case SPELLFAMILY_ROGUE:
             {
-                // Eviscerate
+#if SUPPORTED_CLIENT_BUILD > CLIENT_BUILD_1_11_2
+                // World of Warcraft Client Patch 1.12.0 (2006-08-22)
+                // - Eviscerate: Manual of Eviscerate (Rank 9) now drops off Blackhand
+                //   Assassins in Black Rock Spire.In addition, Eviscerate now increases
+                //   in potency with greater attack power.
                 if (m_spellInfo->IsFitToFamilyMask<CF_ROGUE_EVISCERATE>() && m_caster->GetTypeId() == TYPEID_PLAYER)
                 {
                     if (uint32 combo = ((Player*)m_caster)->GetComboPoints())
                         damage += int32(m_caster->GetTotalAttackPowerValue(BASE_ATTACK) * combo * 0.03f);
                 }
+#endif
                 break;
             }
             case SPELLFAMILY_HUNTER:
@@ -537,7 +548,7 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
 
                         unitTarget->SetVisibility(VISIBILITY_OFF);
                     }
-                    break;
+                    return;
                 }
                 case 11885: // Capture Treant
                 case 11886: // Capture Wildkin
@@ -548,14 +559,30 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                 {
                     if (unitTarget->isDead() && unitTarget->GetTypeId() == TYPEID_UNIT)
                         ((Creature*)unitTarget)->ForcedDespawn(1000);
-                    break;
+                    return;
                 }
-                case 25716 : // Force Self - Bow
+                case 19395: // Gordunni Trap
+                {
+                    if (unitTarget && unitTarget->GetTypeId() == TYPEID_PLAYER)
+                    {
+                        // If GameObject casting was implemented, or activating a trap actually despawned it, this wouldn't be needed.
+                        if (GameObject* pObject = unitTarget->FindNearestGameObject(144050, INTERACTION_DISTANCE))
+                        {
+                            if (pObject->HasStaticDBSpawnData())
+                                unitTarget->CastSpell(unitTarget, urand(0, 1) ? 19394 : 11756, true);
+                            else
+                                pObject->AddObjectToRemoveList();
+                        }
+                    }
+
+                    return;
+                }
+                case 25716: // Force Self - Bow
                 {
                     m_caster->HandleEmote(EMOTE_ONESHOT_BOW);
                     return;
                 }
-                case 27798 : //Nature's Bounty
+                case 27798: // Nature's Bounty
                 {
                     switch(unitTarget->getPowerType())
                     {
@@ -830,7 +857,7 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                     };
 
                     // Had additional effects before BWL patch.
-                    if (sWorld.GetWowPatch() < WOW_PATCH_106)
+                    if (sWorld.GetWowPatch() < WOW_PATCH_106 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_SPELL_EFFECTS))
                         spell_id = spells[urand(0, 5)];
                     else
                         spell_id = spells[urand(0, 1)];
@@ -844,6 +871,14 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                         return;
 
                     ((Creature*)unitTarget)->SetDeathState(JUST_ALIVED);
+                    return;
+                }
+                case 9204:                                  // Hate to Zero
+                {
+                    if (!unitTarget)
+                        return;
+
+                    m_caster->getThreatManager().modifyThreatPercent(unitTarget, -100);
                     return;
                 }
                 case 9976:                                  // Polly Eats the E.C.A.C.
@@ -1374,7 +1409,7 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                 }
                 case 26626:                                 // Mana Burn Area
                 {
-                    if (unitTarget->GetTypeId() != TYPEID_UNIT || unitTarget->getPowerType() != POWER_MANA)
+                    if (unitTarget->getPowerType() != POWER_MANA)
                         return;
 
                     m_caster->CastSpell(unitTarget, 25779, true);
@@ -2450,7 +2485,7 @@ void Spell::EffectHealthLeech(SpellEffectIndex effIndex)
         modOwner->ApplySpellMod(m_spellInfo->Id, SPELLMOD_MULTIPLE_VALUE, healMultiplier);
 
     // get max possible damage, don't count overkill for heal
-    if (damage > unitTarget->GetHealth())
+    if (damage > static_cast<int32>(unitTarget->GetHealth()))
         damage = unitTarget->GetHealth();
 
     if (m_caster->isAlive())
@@ -3566,7 +3601,7 @@ void Spell::EffectSummonGuardian(SpellEffectIndex eff_idx)
                             spawnCreature->GetMotionMaster()->MoveFollow(pCreature, 0.6f, M_PI_F);
                             pCreature->MonsterSay(-1900171);
                             pCreature->SetWalk(false);
-                            pCreature->GetMotionMaster()->MoveWaypoint(false);
+                            pCreature->GetMotionMaster()->MoveWaypoint(0, 0, 0, 0, 0, false);
                         }
                         break;
                     case 976: // Tanaris
@@ -3575,7 +3610,7 @@ void Spell::EffectSummonGuardian(SpellEffectIndex eff_idx)
                             spawnCreature->GetMotionMaster()->MoveFollow(pCreature, 0.6f, M_PI_F);
                             pCreature->MonsterTextEmote(-1900172);
                             pCreature->SetWalk(false);
-                            pCreature->GetMotionMaster()->MoveWaypoint(false);
+                            pCreature->GetMotionMaster()->MoveWaypoint(0, 0, 0, 0, 0, false);
                         }
                         break;
                     case 2255: // Winterspring
@@ -3584,7 +3619,7 @@ void Spell::EffectSummonGuardian(SpellEffectIndex eff_idx)
                             spawnCreature->GetMotionMaster()->MoveFollow(pCreature, 0.6f, M_PI_F);
                             pCreature->MonsterTextEmote(-1900173);
                             pCreature->SetWalk(false);
-                            pCreature->GetMotionMaster()->MoveWaypoint(false);
+                            pCreature->GetMotionMaster()->MoveWaypoint(0, 0, 0, 0, 0, false);
                         }
                         break;
                 }
@@ -4901,6 +4936,23 @@ void Spell::EffectScriptEffect(SpellEffectIndex eff_idx)
                     }
                     return;
                 }
+                case 27686:                                 // Teleport to Razelikh (GROUP)
+                {
+                    if (Player* pPlayerTarget = ToPlayer(unitTarget))
+                    {
+                        if (Group* pGroup = pPlayerTarget->GetGroup())
+                        {
+                            uint32 zone_id = pPlayerTarget->GetCachedZoneId();
+                            for (GroupReference* itr = pGroup->GetFirstMember(); itr != nullptr; itr = itr->next())
+                            {
+                                Player* pGroupMember = itr->getSource();
+                                if (pGroupMember && pGroupMember->IsWithinDistInMap(m_caster, 20.0f))
+                                    pGroupMember->CastSpell(pGroupMember, 13142, true); // Teleport to Razelikh
+                            }
+                        }
+                    }
+                    return;
+                }
             }
             break;
         }
@@ -5053,20 +5105,42 @@ void Spell::EffectSanctuary(SpellEffectIndex eff_idx)
     if (!unitTarget)
         return;
 
+    // World of Warcraft Client Patch 1.12.0 (2006-08-22)
+    // - Neutral guards are now able to see through the rogue Vanish ability.
+    bool guard_check = m_spellInfo->IsFitToFamily<SPELLFAMILY_ROGUE, CF_ROGUE_VANISH>() && (sWorld.GetWowPatch() >= WOW_PATCH_112);
+    bool no_guards = true;
+
     unitTarget->InterruptSpellsCastedOnMe(true);
     unitTarget->CombatStop();
-    unitTarget->getHostileRefManager().deleteReferences();  // stop all fighting
+
+    HostileReference* pReference = unitTarget->getHostileRefManager().getFirst();
+
+    while (pReference)
+    {
+        HostileReference* pNextRef = pReference->next();
+        if (!guard_check || !pReference->getSource()->getOwner()->IsContestedGuard())
+        {
+            pReference->removeReference();
+            delete pReference;
+        }
+        else
+            no_guards = false;
+
+        pReference = pNextRef;
+    }
+    
     unitTarget->m_lastSanctuaryTime = WorldTimer::getMSTime();
 
     // Vanish allows to remove all threat and cast regular stealth so other spells can be used
     if (m_spellInfo->IsFitToFamily<SPELLFAMILY_ROGUE, CF_ROGUE_VANISH>())
     {
         m_caster->RemoveSpellsCausingAura(SPELL_AURA_MOD_ROOT);
-        unitTarget->InterruptAttacksOnMe();
+        unitTarget->InterruptAttacksOnMe(0.0f, guard_check);
 
         if (auto pPlayer = m_caster->ToPlayer())
         {
-            pPlayer->SetCannotBeDetectedTimer(1000);
+            if (no_guards)
+                pPlayer->SetCannotBeDetectedTimer(1000);
         }
     }
 
@@ -5863,7 +5937,7 @@ void Spell::EffectSummonCritter(SpellEffectIndex eff_idx)
 
 void Spell::EffectKnockBack(SpellEffectIndex eff_idx)
 {
-    if (!unitTarget)
+    if (!unitTarget || unitTarget->IsTaxiFlying())
         return;
 
     // remove Dream Fog Sleep aura to let target be launched

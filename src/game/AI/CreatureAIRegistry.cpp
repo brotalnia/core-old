@@ -23,6 +23,7 @@
 #include "ReactorAI.h"
 #include "AggressorAI.h"
 #include "GuardAI.h"
+#include "GuardEventAI.h"
 #include "PetAI.h"
 #include "PetEventAI.h"
 #include "TotemAI.h"
@@ -45,9 +46,10 @@ void Initialize()
     (new CreatureAIFactory<TotemAI>("TotemAI"))->RegisterSelf();
     (new CreatureAIFactory<CreatureEventAI>("EventAI"))->RegisterSelf();
     (new CreatureAIFactory<PetEventAI>("PetEventAI"))->RegisterSelf();
+    (new CreatureAIFactory<GuardEventAI>("GuardEventAI"))->RegisterSelf();
 
 
-    (new MovementGeneratorFactory<RandomMovementGenerator<Creature> >(RANDOM_MOTION_TYPE))->RegisterSelf();
+    (new MovementGeneratorFactory<RandomMovementGenerator>(RANDOM_MOTION_TYPE))->RegisterSelf();
     (new MovementGeneratorFactory<WaypointMovementGenerator<Creature> >(WAYPOINT_MOTION_TYPE))->RegisterSelf();
     (new MovementGeneratorFactory<PatrolMovementGenerator>(PATROL_MOTION_TYPE))->RegisterSelf();
 }

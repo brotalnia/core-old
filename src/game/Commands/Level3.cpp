@@ -813,6 +813,17 @@ bool ChatHandler::HandleReloadGameTeleCommand(char* /*args*/)
     return true;
 }
 
+bool ChatHandler::HandleReloadTaxiPathTransitionsCommand(char* /*args*/)
+{
+    sLog.outString("Re-Loading Taxi path transitions...");
+
+    sObjectMgr.LoadTaxiPathTransitions();
+
+    SendSysMessage("DB table `taxi_path_transitions` reloaded.");
+
+    return true;
+}
+
 bool ChatHandler::HandleReloadLocalesCreatureCommand(char* /*args*/)
 {
     sLog.outString("Re-Loading Locales Creature ...");
@@ -2107,6 +2118,31 @@ bool ChatHandler::HandleLearnAllMyTalentsCommand(char* /*args*/)
     }
 
     SendSysMessage(LANG_COMMAND_LEARN_CLASS_TALENTS);
+    return true;
+}
+
+bool ChatHandler::HandleLearnAllMyTaxisCommand(char* /*args*/)
+{
+    Player* player = m_session->GetPlayer();
+
+    for (uint32 i = 0; i < sCreatureStorage.GetMaxEntry(); ++i)
+    {
+        if (const CreatureInfo *cInfo = sCreatureStorage.LookupEntry<CreatureInfo>(i))
+            if (cInfo->npcflag & UNIT_NPC_FLAG_FLIGHTMASTER)
+            {
+                FindCreatureData worker(cInfo->Entry, player);
+                sObjectMgr.DoCreatureData(worker);
+                if (CreatureDataPair const* dataPair = worker.GetResult())
+                    if (CreatureData const* data = &dataPair->second)
+                        if (uint32 taxiNode = sObjectMgr.GetNearestTaxiNode(data->posX, data->posY, data->posZ, data->mapid, player->GetTeam()))
+                            if (player->m_taxi.SetTaximaskNode(taxiNode))
+                            {
+                                WorldPacket msg(SMSG_NEW_TAXI_PATH, 0);
+                                GetSession()->SendPacket(&msg);
+                            }
+            }
+    }
+    SendSysMessage(LANG_COMMAND_LEARN_TAXIS);
     return true;
 }
 
@@ -3744,9 +3780,52 @@ bool ChatHandler::HandleGuildDeleteCommand(char* args)
     return true;
 }
 
+/**
+ * Renames a guild if a guild could be found with the specified name.
+ * Usage: .guild rename "name" "new name"
+ * It is not possible to rename a guild to a name that is already in use.
+ */
+bool ChatHandler::HandleGuildRenameCommand(char* args)
+{
+    if (!args || !*args)
+        return false;
+
+    char* currentName = ExtractQuotedArg(&args);
+    if (!currentName)
+        return false;
+
+    std::string current(currentName);
+
+    char* newName = ExtractQuotedArg(&args);
+    if (!newName)
+        return false;
+
+    std::string newn(newName);
+
+    Guild* target = sGuildMgr.GetGuildByName(currentName);
+    if (!target)
+    {
+        SendSysMessage(LANG_GUILD_NOT_FOUND);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    if (Guild* existing = sGuildMgr.GetGuildByName(newn))
+    {
+        PSendSysMessage("A guild with the name '%s' already exists", newName);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    target->Rename(newn);
+    PSendSysMessage("Guild '%s' successfully renamed to '%s'. Players must relog to see the changes", currentName, newName);
+    return true;
+}
+
+
 bool ChatHandler::HandleGetDistanceCommand(char* args)
 {
-    WorldObject* obj = NULL;
+    WorldObject* obj = nullptr;
 
     if (*args)
     {
@@ -3780,6 +3859,41 @@ bool ChatHandler::HandleGetDistanceCommand(char* args)
     dz = player->GetPositionZ() - obj->GetPositionZ();
 
     PSendSysMessage(LANG_DISTANCE, player->GetDistance(obj), player->GetDistance2d(obj), sqrt(dx * dx + dy * dy + dz * dz));
+
+    return true;
+}
+
+bool ChatHandler::HandleGetAngleCommand(char* args)
+{
+    WorldObject* obj = nullptr;
+
+    if (*args)
+    {
+        if (ObjectGuid guid = ExtractGuidFromLink(&args))
+            obj = (WorldObject*)m_session->GetPlayer()->GetObjectByTypeMask(guid, TYPEMASK_CREATURE_OR_GAMEOBJECT);
+
+        if (!obj)
+        {
+            SendSysMessage(LANG_PLAYER_NOT_FOUND);
+            SetSentErrorMessage(true);
+            return false;
+        }
+    }
+    else
+    {
+        obj = getSelectedUnit();
+
+        if (!obj)
+        {
+            SendSysMessage(LANG_SELECT_CHAR_OR_CREATURE);
+            SetSentErrorMessage(true);
+            return false;
+        }
+    }
+
+    Player* player = m_session->GetPlayer();
+    float angle = player->GetAngle(obj);
+    PSendSysMessage("You are at a %f angle to %s.", angle, obj->GetName());
 
     return true;
 }
@@ -4617,7 +4731,7 @@ bool ChatHandler::HandleStableCommand(char* /*args*/)
 
 bool ChatHandler::HandleChangeWeatherCommand(char* args)
 {
-    //Weather is OFF
+    // Weather is OFF
     if (!sWorld.getConfig(CONFIG_BOOL_WEATHER))
     {
         SendSysMessage(LANG_WEATHER_DISABLED);
@@ -4629,33 +4743,28 @@ bool ChatHandler::HandleChangeWeatherCommand(char* args)
     if (!ExtractUInt32(&args, type))
         return false;
 
-    //0 to 3, 0: fine, 1: rain, 2: snow, 3: sand
-    if (type > 3)
+    // see enum WeatherType
+    if (!Weather::IsValidWeatherType(type))
         return false;
 
     float grade;
     if (!ExtractFloat(&args, grade))
         return false;
 
-    //0 to 1, sending -1 is instand good weather
-    if (grade < 0.0f || grade > 1.0f)
-        return false;
+    // clamp grade from 0 to 1
+    if (grade < 0.0f)
+        grade = 0.0f;
+    else if (grade > 1.0f)
+        grade = 1.0f;
 
-    Player *player = m_session->GetPlayer();
-    uint32 zoneid = player->GetZoneId();
-
-    Weather* wth = sWorld.FindWeather(zoneid);
-
-    if (!wth)
-        wth = sWorld.AddWeather(zoneid);
-    if (!wth)
+    Player* player = m_session->GetPlayer();
+    uint32 zoneId = player->GetZoneId();
+    if (!sWeatherMgr.GetWeatherChances(zoneId))
     {
         SendSysMessage(LANG_NO_WEATHER);
         SetSentErrorMessage(true);
-        return false;
     }
-
-    wth->SetWeather(WeatherType(type), grade);
+    player->GetMap()->SetWeather(zoneId, (WeatherType)type, grade, false);
 
     return true;
 }
@@ -4736,7 +4845,7 @@ bool ChatHandler::HandleListAurasCommand(char* /*args*/)
         bool talent = GetTalentSpellCost(itr->second->GetId()) > 0;
 
         SpellAuraHolder *holder = itr->second;
-        char const* name = holder->GetSpellProto()->SpellName[GetSessionDbcLocale()];
+        char const* name = holder->GetSpellProto()->SpellName[GetSessionDbcLocale()].c_str();
 
         for (int32 i = 0; i < MAX_EFFECT_INDEX; ++i)
         {
@@ -5573,6 +5682,12 @@ bool ChatHandler::HandleUnBanHelper(BanMode mode, char* args)
 
     std::string nameOrIP = cnameOrIP;
 
+    char* message = ExtractQuotedOrLiteralArg(&args);
+    if (!message)
+        return false;
+
+    std::string unbanMessage(message);
+
     switch (mode)
     {
         case BAN_ACCOUNT:
@@ -5597,8 +5712,10 @@ bool ChatHandler::HandleUnBanHelper(BanMode mode, char* args)
             break;
     }
 
-    if (sWorld.RemoveBanAccount(mode, nameOrIP))
-        PSendSysMessage(LANG_UNBAN_UNBANNED, nameOrIP.c_str());
+    std::string source = m_session ? m_session->GetPlayerName() : "CONSOLE";
+
+    if (sWorld.RemoveBanAccount(mode, source, unbanMessage, nameOrIP))
+        PSendSysMessage(LANG_UNBAN_UNBANNED, nameOrIP.c_str(), unbanMessage.c_str());
     else
         PSendSysMessage(LANG_UNBAN_ERROR, nameOrIP.c_str());
 
@@ -5622,7 +5739,7 @@ bool ChatHandler::HandleBanInfoCharacterCommand(char* args)
 {
     Player* target;
     ObjectGuid target_guid;
-    if (!ExtractPlayerTarget(&args, &target, &target_guid))
+    if (!ExtractPlayerTarget(&args, &target, &target_guid,NULL,true))
         return false;
 
     uint32 accountid = target ? target->GetSession()->GetAccountId() : sObjectMgr.GetPlayerAccountIdByGUID(target_guid);
@@ -7851,6 +7968,8 @@ bool ChatHandler::HandleModifyCastSpeedCommand(char *args)
     if (!ExtractFloat(&args, amount))
         return false;
 
+    // This field is an Int32 before 1.12.
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
     if (amount < 0)
     {
         SendSysMessage(LANG_BAD_VALUE);
@@ -7859,6 +7978,9 @@ bool ChatHandler::HandleModifyCastSpeedCommand(char *args)
     }
 
     player->SetFloatValue(UNIT_MOD_CAST_SPEED, amount);
+#else
+    player->SetInt32Value(UNIT_MOD_CAST_SPEED, amount);
+#endif
 
     PSendSysMessage(LANG_YOU_CHANGE_CSPD, player->GetName(), amount);
 
