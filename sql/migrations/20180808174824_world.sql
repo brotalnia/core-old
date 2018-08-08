@@ -22,6 +22,8 @@ UPDATE `quest_template` SET `StartScript`=3382 WHERE `entry`=3382;
 
 UPDATE `creature_template` SET `flags_extra`=0 WHERE `entry`=15341;
 
+UPDATE `game_event` SET `start_time`='2015-03-30 04:00:00', `disabled`=0, `patch_max`=1 WHERE `entry`=157;
+
 
 -- End of migration.
 END IF;
