@@ -441,7 +441,10 @@ void TargetedMovementGeneratorMedium<T, D>::DoSpreadIfNeeded(T &owner, Unit* tar
     }
 
     if (!spread_from)
+    {
+        i_can_spread = false;
         return;
+    }  
     
     float my_angle = target->GetAngle(&owner);
     float his_angle = target->GetAngle(spread_from);
@@ -459,9 +462,6 @@ void TargetedMovementGeneratorMedium<T, D>::DoSpreadIfNeeded(T &owner, Unit* tar
         return;
 
     i_backing_up = true;
-
-    if (urand(0,1))
-        i_can_spread = false;
 
     Movement::MoveSplineInit init(owner, "TargetedMovementGenerator");
     init.MoveTo(x, y, z, MOVE_WALK_MODE);
